@@ -82,7 +82,7 @@ else {
     et = uptime_cur - uptime_sav;
     if (et < 0.01) et = 0.005;
     uptime_sav = uptime_cur;
-    // 根据 CPU 计数模式调整缩放因子
+    // if in Solaris mode, adjust our scaling for all cpus
     Frame_etscale = 100.0f / ((float)Hertz * (float)et * (Rc.mode_irixps ? 1 : Cpu_cnt));
 }
 ```
@@ -91,8 +91,8 @@ else {
 - 获取系统启动时间
 - 计算距离上次刷新的时间间隔 (et)
 - 计算 `Frame_etscale` - CPU 使用率的缩放因子
-  - 在 Irix 模式下 (mode_irixps=true)：按单个 CPU 计算（除数为1）
-  - 在 Solaris 模式下 (mode_irixps=false)：按所有 CPU 总和计算（除数为 Cpu_cnt）
+  - 在 Irix 模式下 (mode_irixps=true)：不除以 CPU 数量，每个 CPU 可达 100%
+  - 在 Solaris 模式下 (mode_irixps=false)：除以 CPU 数量，所有 CPU 总和为 100%
 
 **关键变量**:
 - `Hertz`: 系统时钟频率（通常是 100）

@@ -82,7 +82,7 @@ else {
     et = uptime_cur - uptime_sav;
     if (et < 0.01) et = 0.005;
     uptime_sav = uptime_cur;
-    // Adjust scaling for all CPUs in Solaris mode
+    // Adjust scaling factor based on CPU counting mode
     Frame_etscale = 100.0f / ((float)Hertz * (float)et * (Rc.mode_irixps ? 1 : Cpu_cnt));
 }
 ```
@@ -91,8 +91,8 @@ else {
 - Get system uptime
 - Calculate time interval since last refresh (et)
 - Calculate `Frame_etscale` - scaling factor for CPU usage
-  - In Irix mode: Calculate per single CPU
-  - In Solaris mode: Calculate per total of all CPUs
+  - In Irix mode (mode_irixps=true): Calculate per single CPU (divisor is 1)
+  - In Solaris mode (mode_irixps=false): Calculate per total of all CPUs (divisor is Cpu_cnt)
 
 **Key Variables**:
 - `Hertz`: System clock frequency (typically 100)

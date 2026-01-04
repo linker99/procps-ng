@@ -134,6 +134,44 @@ gcc -o migration_example_new migration_example.c \
 3. **不同的访问方式**: 使用 `PIDS_VAL()` 宏而不是直接访问字段
 4. **类型安全**: 需要指定正确的类型（s_int, ul_int, str 等）
 5. **库名变化**: 链接时使用 `-lproc2` 而不是 `-lproc`
+6. **函数签名变化**: 传递索引而非结构体指针（见下文）
+
+## 函数签名变化示例
+
+一个常见的变化是函数不再直接接收 `proc_t *` 指针，而是接收索引。
+
+### 示例：forest_display 函数
+
+**旧签名:**
+```c
+static inline const char *forest_display(const WIN_t *q, const proc_t *p)
+```
+
+**新签名:**
+```c
+static inline const char *forest_display(const WIN_t *q, int idx)
+```
+
+**适配方法:**
+```c
+static inline const char *forest_display(const WIN_t *q, int idx) {
+    // 从窗口结构中提取 pids_stack
+    struct pids_stack *p = q->ppt[idx];
+    
+    // 现在使用 PIDS_VAL 宏访问字段
+    const char *cmd = PIDS_VAL(eu_CMD, str, p);
+    int level = PIDS_VAL(eu_TREE_LVL, s_int, p);
+    
+    // ... 原有的处理逻辑 ...
+}
+```
+
+**关键点:**
+- 窗口结构 `q` 现在包含 `pids_stack` 指针数组：`q->ppt[]`
+- 使用索引 `idx` 访问特定进程：`q->ppt[idx]`
+- 所有字段访问都改用 `PIDS_VAL()` 宏
+
+详细说明请参考 `doc/MIGRATION_GUIDE_proc_t_to_pids.md` 的"函数签名变化"章节。
 
 ## 优势
 

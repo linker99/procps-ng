@@ -205,6 +205,60 @@ for (int i = 0; i < fetched->counts->total; i++) {
 }
 ```
 
+## 函数签名变化
+
+### 传递进程数据到函数
+
+在旧 API 中，函数通常直接接收 `proc_t *` 指针。在新 API 中，有几种常见模式：
+
+#### 模式 1：直接传递 pids_stack
+
+**旧代码:**
+```c
+static void display_process(const proc_t *p) {
+    printf("PID: %d, CMD: %s\n", p->tid, p->cmd);
+}
+```
+
+**新代码:**
+```c
+static void display_process(struct pids_stack *stack, int pid_idx, int cmd_idx) {
+    printf("PID: %d, CMD: %s\n",
+           PIDS_VAL(pid_idx, s_int, stack),
+           PIDS_VAL(cmd_idx, str, stack));
+}
+```
+
+#### 模式 2：传递索引（top 程序的做法）
+
+**旧代码:**
+```c
+static inline const char *forest_display(const WIN_t *q, const proc_t *p) {
+    const char *cmd = p->cmd;
+    // ... 处理逻辑 ...
+}
+```
+
+**新代码:**
+```c
+static inline const char *forest_display(const WIN_t *q, int idx) {
+    // 从窗口结构中提取 pids_stack
+    struct pids_stack *p = q->ppt[idx];
+    
+    // 使用 PIDS_VAL 访问字段
+    const char *cmd = PIDS_VAL(eu_CMD, str, p);
+    // ... 处理逻辑 ...
+}
+```
+
+**关键要点:**
+- 窗口结构 `WIN_t` 现在包含 `pids_stack` 指针数组：`q->ppt[idx]`
+- 不传递进程结构，而是传递索引
+- 函数内部提取栈：`struct pids_stack *p = q->ppt[idx]`
+- 使用 `PIDS_VAL()` 宏访问字段
+
+详细说明请参考 `MIGRATION_GUIDE_proc_t_to_pids.md` 中的"函数签名变化"章节。
+
 ## 性能优势
 
 新 API 提供了几个性能优势：

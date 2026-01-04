@@ -10,7 +10,8 @@ This guide helps developers migrate code from the old `proc_t` structure API (us
 2. [API Comparison](#api-comparison)
 3. [Field Mapping](#field-mapping)
 4. [Migration Examples](#migration-examples)
-5. [Best Practices](#best-practices)
+5. [Function Signature Changes](#function-signature-changes)
+6. [Best Practices](#best-practices)
 
 ## Key Differences
 
@@ -674,6 +675,130 @@ void show_threads_new(pid_t pid) {
     
     procps_pids_unref(&info);
 }
+```
+
+## Function Signature Changes
+
+### Passing Process Data to Functions
+
+In the old API, functions typically received a `proc_t *` pointer directly. In the new API, there are two common patterns:
+
+#### Pattern 1: Pass the pids_stack directly
+
+**Old API:**
+```c
+static void display_process(const proc_t *p) {
+    printf("PID: %d, CMD: %s\n", p->tid, p->cmd);
+}
+
+// Usage
+while ((proc = readproc(pt, proc)) != NULL) {
+    display_process(proc);
+}
+```
+
+**New API:**
+```c
+static void display_process(struct pids_stack *stack, int pid_idx, int cmd_idx) {
+    printf("PID: %d, CMD: %s\n",
+           PIDS_VAL(pid_idx, s_int, stack),
+           PIDS_VAL(cmd_idx, str, stack));
+}
+
+// Usage
+for (int i = 0; i < fetched->counts->total; i++) {
+    display_process(fetched->stacks[i], MY_PID, MY_CMD);
+}
+```
+
+#### Pattern 2: Pass an index and use a window/context structure
+
+This pattern is used in `top` where process data is stored in a window structure.
+
+**Old API:**
+```c
+static inline const char *forest_display(const WIN_t *q, const proc_t *p) {
+    // Access fields directly from proc_t
+    const char *cmd = p->cmd;
+    int level = p->some_field;
+    // ... process display logic ...
+    return formatted_string;
+}
+
+// Usage
+forest_display(window, proc);
+```
+
+**New API:**
+```c
+static inline const char *forest_display(const WIN_t *q, int idx) {
+    // Extract pids_stack from the window's array
+    struct pids_stack *p = q->ppt[idx];
+    
+    // Access fields using PIDS_VAL with predefined indices
+    const char *cmd = PIDS_VAL(eu_CMD, str, p);
+    int level = PIDS_VAL(eu_TREE_LVL, s_int, p);
+    // ... process display logic ...
+    return formatted_string;
+}
+
+// Usage
+forest_display(window, process_index);
+```
+
+**Key Points:**
+- The window structure (`WIN_t`) now contains an array of `pids_stack` pointers: `q->ppt[idx]`
+- Instead of passing the process structure, pass the index
+- Inside the function, retrieve the stack: `struct pids_stack *p = q->ppt[idx]`
+- Use `PIDS_VAL()` macro to access fields
+- Define enums for field indices (e.g., `eu_CMD`, `eu_TREE_LVL`) for clarity
+
+#### Pattern 3: Create wrapper structures (for complex cases)
+
+If you need to pass process data between many functions, consider creating a wrapper:
+
+```c
+// Define a context structure
+typedef struct {
+    struct pids_stack *stack;
+    // Store commonly used indices
+    int pid_idx;
+    int cmd_idx;
+    int mem_idx;
+} proc_context_t;
+
+static void init_proc_context(proc_context_t *ctx, struct pids_stack *stack) {
+    ctx->stack = stack;
+    ctx->pid_idx = MY_PID;
+    ctx->cmd_idx = MY_CMD;
+    ctx->mem_idx = MY_MEM;
+}
+
+static void display_process(const proc_context_t *ctx) {
+    printf("PID: %d, CMD: %s, MEM: %lu\n",
+           PIDS_VAL(ctx->pid_idx, s_int, ctx->stack),
+           PIDS_VAL(ctx->cmd_idx, str, ctx->stack),
+           PIDS_VAL(ctx->mem_idx, ul_int, ctx->stack));
+}
+```
+
+### Storing Process References
+
+**Old API:**
+```c
+// Store array of proc_t pointers
+proc_t **saved_procs = malloc(count * sizeof(proc_t *));
+for (int i = 0; i < count; i++) {
+    saved_procs[i] = readproc(pt, NULL);
+}
+```
+
+**New API:**
+```c
+// Store array of pids_stack pointers from fetched results
+struct pids_stack **saved_stacks = fetched->stacks;
+// Note: These are owned by the pids_info context
+// Don't free them individually; they're freed when you call procps_pids_unref()
 ```
 
 ## Best Practices

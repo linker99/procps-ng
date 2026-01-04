@@ -210,15 +210,20 @@ This table maps `proc_t` structure fields to their corresponding `PIDS_*` enumer
 ### Time Information
 | proc_t field | pids.h enum | Type | Notes |
 |--------------|-------------|------|-------|
-| `utime` | `PIDS_TIME_USER` | ull_int | User Time |
-| `stime` | `PIDS_TIME_SYSTEM` | ull_int | System Time |
-| `cutime` | `PIDS_TIME_CUUSER` | ull_int | Cumulative User Time |
-| `cstime` | `PIDS_TIME_CSYSTEM` | ull_int | Cumulative System Time |
-| `start_time` | `PIDS_TIME_START` | ull_int | Start Time |
-| N/A | `PIDS_TIME_ALL` | ull_int | utime + stime |
-| N/A | `PIDS_TIME_ALL_C` | ull_int | utime + stime + cutime + cstime |
-| `gtime` | `PIDS_TIME_GUEST` | ull_int | Guest Time |
-| `cgtime` | `PIDS_TIME_CGUEST` | ull_int | Cumulative Guest Time |
+| `utime` | `PIDS_TICS_USER` | ull_int | User Time (in ticks/jiffies) |
+| `stime` | `PIDS_TICS_SYSTEM` | ull_int | System Time (in ticks/jiffies) |
+| `cutime` | `PIDS_TICS_USER_C` | ull_int | Cumulative User Time |
+| `cstime` | `PIDS_TICS_SYSTEM_C` | ull_int | Cumulative System Time |
+| `start_time` | `PIDS_TICS_BEGAN` | ull_int | Start Time (in ticks since boot) |
+| N/A | `PIDS_TICS_ALL` | ull_int | utime + stime |
+| N/A | `PIDS_TICS_ALL_C` | ull_int | utime + stime + cutime + cstime |
+| `gtime` | `PIDS_TICS_GUEST` | ull_int | Guest Time |
+| `cgtime` | `PIDS_TICS_GUEST_C` | ull_int | Cumulative Guest Time |
+| `blkio_tics` | `PIDS_TICS_BLKIO` | ull_int | Block I/O Time |
+| N/A | `PIDS_TIME_START` | real | Start time in seconds (converted) |
+| N/A | `PIDS_TIME_ELAPSED` | real | Elapsed time in seconds |
+| N/A | `PIDS_TIME_ALL` | real | Total CPU time in seconds |
+| N/A | `PIDS_TIME_ALL_C` | real | Total CPU time including children |
 
 ### Memory Information
 | proc_t field | pids.h enum | Type | Notes |

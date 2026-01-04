@@ -54,9 +54,9 @@
 | `vm_rss` | `PIDS_MEM_RES` | `ul_int` |
 | `share` (pages) | `PIDS_MEM_SHR_PGS` | `ul_int` |
 | N/A (KB) | `PIDS_MEM_SHR` | `ul_int` |
-| `utime` | `PIDS_TIME_USER` | `ull_int` |
-| `stime` | `PIDS_TIME_SYSTEM` | `ull_int` |
-| `utime + stime` | `PIDS_TIME_ALL` | `ull_int` |
+| `utime` | `PIDS_TICS_USER` | `ull_int` |
+| `stime` | `PIDS_TICS_SYSTEM` | `ull_int` |
+| `utime + stime` | `PIDS_TICS_ALL` | `ull_int` |
 | `nice` | `PIDS_NICE` | `s_int` |
 | `priority` | `PIDS_PRIORITY` | `s_int` |
 | `processor` | `PIDS_PROCESSOR` | `s_int` |

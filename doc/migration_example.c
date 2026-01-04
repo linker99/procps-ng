@@ -4,23 +4,27 @@
  * This file demonstrates side-by-side comparison of old proc_t API
  * and new pids.h API for common operations.
  *
- * Compile old API version:
+ * Compile old API version (if old API is installed):
  *   gcc -DUSE_OLD_API migration_example.c -lproc -o migration_old
  *
  * Compile new API version:
+ *   gcc migration_example.c -I../library/include -L../library/.libs -lproc2 -Wl,-rpath,../library/.libs -o migration_new
+ *
+ * Or if installed system-wide:
  *   gcc migration_example.c -lproc2 -o migration_new
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #ifdef USE_OLD_API
 /******************************************************************************
  * OLD API (proc_t / readproc.h)
  ******************************************************************************/
 
-#include <proc/readproc.h>
+#include <readproc.h>
 
 void example1_list_all_processes(void) {
     PROCTAB *pt;
@@ -159,7 +163,7 @@ void example5_with_threads(pid_t target_pid) {
  * NEW API (pids.h)
  ******************************************************************************/
 
-#include <proc/pids.h>
+#include <pids.h>
 
 // Helper enum for clearer code
 enum {
@@ -309,9 +313,9 @@ void example4_cpu_time(void) {
     
     enum pids_item items[] = {
         PIDS_ID_PID,
-        PIDS_TIME_USER,
-        PIDS_TIME_SYSTEM,
-        PIDS_TIME_ALL
+        PIDS_TICS_USER,
+        PIDS_TICS_SYSTEM,
+        PIDS_TICS_ALL
     };
     int numitems = sizeof(items) / sizeof(items[0]);
     

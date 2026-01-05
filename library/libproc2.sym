@@ -76,3 +76,12 @@ LIBPROC_2.2 {
         procps_sigmask_names;
         procps_capmask_names;
 } LIBPROC_2.1;
+
+LIBPROC_2.3 {
+	procps_compat_closeproc;
+	procps_compat_flags_to_items;
+	procps_compat_freeproc;
+	procps_compat_openproc;
+	procps_compat_readproc;
+	procps_compat_stack_to_proc_t;
+} LIBPROC_2.2;

@@ -13,7 +13,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <libproc2/procps_compat.h>
+#include "procps_compat.h"
 
 int main(int argc, char *argv[])
 {

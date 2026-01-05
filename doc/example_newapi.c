@@ -13,7 +13,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <libproc2/pids.h>
+#include "pids.h"
 
 /* Define the process information items we want to retrieve */
 enum rel_items {

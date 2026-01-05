@@ -108,8 +108,14 @@ typedef struct procps_compat_proctab {
  * Convert a pids_stack to proc_t structure
  * 
  * This function fills a proc_t structure with data from a pids_stack.
- * The proc_t structure should be initialized to zero before first use.
- * The caller is responsible for freeing the proc_t with procps_compat_freeproc().
+ * The proc_t structure should be allocated and initialized to zero by the caller.
+ * 
+ * IMPORTANT: Memory Management
+ * - String fields (cmd, euser, etc.) are duplicated with strdup() and must be freed
+ * - If you allocated the proc_t yourself, free string fields manually:
+ *     free(proc.cmd); free(proc.euser); ... free(proc.exe);
+ * - If you got the proc_t from procps_compat_readproc(), use procps_compat_freeproc()
+ *   which handles all string fields automatically
  * 
  * Parameters:
  *   stack - The pids_stack to convert from
@@ -119,6 +125,10 @@ typedef struct procps_compat_proctab {
  *
  * Returns:
  *   0 on success, -1 on error
+ * 
+ * Limitations:
+ *   Vector fields (environ_v, cmdline_v, cgroup_v) are NOT populated.
+ *   Use the string versions (environ, cmdline, cgroup) or use the new API directly.
  */
 int procps_compat_stack_to_proc_t(
     struct pids_stack *stack,
@@ -159,8 +169,20 @@ proc_t *procps_compat_readproc(procps_compat_proctab *pt);
 /*
  * Free a proc_t structure allocated by compatibility layer
  *
+ * This function frees all dynamically allocated strings within the proc_t
+ * structure and then frees the proc_t itself. Use this ONLY for proc_t
+ * structures returned by procps_compat_readproc().
+ * 
+ * If you used procps_compat_stack_to_proc_t() with your own proc_t structure,
+ * you must manually free the string fields, NOT call this function.
+ * 
  * Parameters:
- *   proc - The proc_t structure to free
+ *   proc - The proc_t structure to free (must be from procps_compat_readproc)
+ *
+ * Limitations:
+ *   Vector fields (environ_v, cmdline_v, cgroup_v) are not freed as they are
+ *   not populated by the compatibility layer. If you need these fields, use
+ *   the new API directly.
  */
 void procps_compat_freeproc(proc_t *proc);
 

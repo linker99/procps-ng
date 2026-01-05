@@ -643,11 +643,14 @@ int procps_compat_stack_to_proc_t(
     return 0;
 }
 
+/* Maximum number of pids_item enums we support in compatibility mode */
+#define COMPAT_MAX_ITEMS 256
+
 /* Initialize process table reading with compatibility mode */
 procps_compat_proctab *procps_compat_openproc(unsigned flags)
 {
     procps_compat_proctab *pt;
-    enum pids_item items[256];  /* Should be enough for most use cases */
+    enum pids_item items[COMPAT_MAX_ITEMS];
     int num_items;
     
     pt = calloc(1, sizeof(procps_compat_proctab));
@@ -657,7 +660,7 @@ procps_compat_proctab *procps_compat_openproc(unsigned flags)
     pt->flags = flags;
     
     /* Convert flags to items array */
-    num_items = procps_compat_flags_to_items(flags, items, 256);
+    num_items = procps_compat_flags_to_items(flags, items, COMPAT_MAX_ITEMS);
     if (num_items <= 0) {
         free(pt);
         return NULL;

@@ -77,3 +77,5 @@ src/tests/test_strutils
 *.sum
 *.exe
 *.mo
+doc/migration_example_new
+doc/migration_example_old

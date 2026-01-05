@@ -182,6 +182,68 @@ static inline const char *forest_display(const WIN_t *q, int idx) {
 - ✅ 更好的错误处理
 - ✅ 内置排序功能
 
+## 关于转换函数的重要说明
+
+### 为什么不能直接从 pids_stack 转换到 proc_t
+
+**重要**: 您**不能**直接将 `struct pids_stack *` 转换为 `proc_t *`，原因如下：
+
+1. **proc_t 在新 API 中不存在** - 它已被完全移除
+2. **数据模型不同** - 旧 API 使用结构体，新 API 使用结果栈
+3. **内存所有权不同** - 旧 API 分配 proc_t，新 API 内部管理栈
+4. **架构不兼容** - 两个 API 在设计上根本不同
+
+### 正确的做法：创建适配器结构
+
+如果您有需要 `proc_t *` 的旧代码，可以创建一个适配器结构：
+
+```c
+// 定义一个类似 proc_t 的结构体，但从 pids_stack 获取数据
+typedef struct {
+    int tid;
+    int ppid;
+    char state;
+    char *cmd;
+    unsigned long vm_rss;
+    unsigned long long utime;
+    unsigned long long stime;
+    
+    struct pids_stack *source_stack;  // 保持对源的引用
+} proc_adapter_t;
+
+// 从 pids_stack 填充适配器的函数
+void populate_adapter(proc_adapter_t *adapter, struct pids_stack *stack) {
+    adapter->source_stack = stack;
+    adapter->tid = PIDS_VAL(tid_idx, s_int, stack);
+    adapter->ppid = PIDS_VAL(ppid_idx, s_int, stack);
+    adapter->cmd = PIDS_VAL(cmd_idx, str, stack);
+    adapter->vm_rss = PIDS_VAL(rss_idx, ul_int, stack);
+    // ... 根据需要填充其他字段
+}
+
+// 使用
+proc_adapter_t adapter;
+populate_adapter(&adapter, pids_stack);
+legacy_function(&adapter);  // 传递给期望 proc_t 的旧函数
+```
+
+**重要提醒:**
+- ⚠️ 这是**临时解决方案**，用于渐进式迁移
+- ⚠️ 字符串指针指向库拥有的数据 - 不要释放它们
+- ⚠️ 适配器仅在源 `pids_stack` 存在时有效
+- ⚠️ 应当尽快重写旧函数以直接使用新 API
+
+详细的适配器实现示例请参考 `doc/MIGRATION_GUIDE_proc_t_to_pids.md` 中的"兼容层"章节。
+
+### 推荐的迁移路径
+
+不要创建适配器，推荐的方法是：
+
+1. **识别所有使用 proc_t 的代码**
+2. **重写函数以接受 `pids_stack *` 和字段索引**
+3. **仅对难以修改的遗留代码使用适配器层**
+4. **在重构时逐步消除适配器**
+
 ## 获取帮助
 
 如果在迁移过程中遇到问题：

@@ -1006,7 +1006,79 @@ int pid = PIDS_VAL(MY_PID, s_int, stack);  // Always correct
 
 ## Compatibility Layer
 
-If you need to support both APIs temporarily, you can create a compatibility layer:
+### Why Direct Conversion is Not Possible
+
+**Important**: You **cannot** directly convert `struct pids_stack *` to `proc_t *` because:
+
+1. **`proc_t` doesn't exist in the new API** - It was completely removed
+2. **Different data models** - Old API uses structures, new API uses result stacks
+3. **Memory ownership differs** - Old API allocated proc_t, new API manages stacks internally
+4. **Architectural incompatibility** - The APIs are fundamentally different by design
+
+If you have code that expects `proc_t *`, you must rewrite it to use `pids_stack *` or create an adapter.
+
+### Creating an Adapter Structure
+
+If you need to pass process data to legacy code, create a wrapper structure that mimics `proc_t` fields:
+
+```c
+// Define a structure that looks like proc_t but gets data from pids_stack
+typedef struct {
+    // Process IDs
+    int tid;
+    int ppid;
+    int tgid;
+    
+    // State and priority
+    char state;
+    int nice;
+    int priority;
+    
+    // Memory info
+    unsigned long vm_size;
+    unsigned long vm_rss;
+    unsigned long vm_swap;
+    
+    // Time info
+    unsigned long long utime;
+    unsigned long long stime;
+    
+    // Strings (point to pids_stack data - don't free!)
+    char *cmd;
+    char *euser;
+    
+    // Keep reference to source
+    struct pids_stack *source_stack;
+} proc_adapter_t;
+
+// Function to populate adapter from pids_stack
+void populate_proc_adapter(proc_adapter_t *adapter, struct pids_stack *stack,
+                           int tid_idx, int ppid_idx, int cmd_idx, /* ... other indices ... */) {
+    adapter->source_stack = stack;
+    
+    // Extract values using PIDS_VAL
+    adapter->tid = PIDS_VAL(tid_idx, s_int, stack);
+    adapter->ppid = PIDS_VAL(ppid_idx, s_int, stack);
+    adapter->cmd = PIDS_VAL(cmd_idx, str, stack);
+    // ... populate other fields as needed ...
+}
+
+// Usage
+proc_adapter_t adapter;
+populate_proc_adapter(&adapter, pids_stack, MY_TID, MY_PPID, MY_CMD, /* ... */);
+
+// Now you can pass &adapter to functions expecting proc_t-like structures
+legacy_function(&adapter);
+```
+
+**Important Notes:**
+- String pointers (`cmd`, `euser`) point to data owned by `pids_stack` - don't free them
+- The adapter is only valid as long as the source `pids_stack` exists
+- This is a **temporary solution** - rewrite legacy functions when possible
+
+### Conditional Compilation for Gradual Migration
+
+If you need to support both APIs temporarily, use conditional compilation:
 
 ```c
 #ifdef USE_OLD_API
@@ -1035,6 +1107,153 @@ void proc_iter_free(proc_iter_t *iter);
 ```
 
 This allows gradual migration while maintaining compatibility.
+
+### Example: Wrapper for Legacy Code
+
+If you have a large codebase with many functions expecting `proc_t *`, create a comprehensive wrapper:
+
+```c
+// proc_compat.h - Compatibility layer header
+#ifndef PROC_COMPAT_H
+#define PROC_COMPAT_H
+
+#include <pids.h>
+
+// Indices for pids items (define these based on your needs)
+enum {
+    COMPAT_TID = 0,
+    COMPAT_PPID,
+    COMPAT_STATE,
+    COMPAT_CMD,
+    COMPAT_VM_RSS,
+    COMPAT_UTIME,
+    COMPAT_STIME,
+    // ... add more as needed
+    COMPAT_ITEM_COUNT
+};
+
+// Adapter structure
+typedef struct {
+    int tid;
+    int ppid;
+    char state;
+    char *cmd;
+    unsigned long vm_rss;
+    unsigned long long utime;
+    unsigned long long stime;
+    // ... other commonly used fields
+    
+    struct pids_stack *_internal_stack;  // Don't access directly
+} proc_compat_t;
+
+// Initialize the compatibility layer
+int proc_compat_init(void);
+
+// Get all processes as compat structures
+proc_compat_t **proc_compat_get_all(int *count);
+
+// Free compat structures
+void proc_compat_free(proc_compat_t **procs, int count);
+
+#endif
+
+// proc_compat.c - Implementation
+#include "proc_compat.h"
+#include <stdlib.h>
+
+static struct pids_info *compat_info = NULL;
+static enum pids_item compat_items[COMPAT_ITEM_COUNT];
+
+int proc_compat_init(void) {
+    // Define what items we need
+    compat_items[COMPAT_TID] = PIDS_ID_TID;
+    compat_items[COMPAT_PPID] = PIDS_ID_PPID;
+    compat_items[COMPAT_STATE] = PIDS_STATE;
+    compat_items[COMPAT_CMD] = PIDS_CMD;
+    compat_items[COMPAT_VM_RSS] = PIDS_MEM_RES;
+    compat_items[COMPAT_UTIME] = PIDS_TICS_USER;
+    compat_items[COMPAT_STIME] = PIDS_TICS_SYSTEM;
+    
+    return procps_pids_new(&compat_info, compat_items, COMPAT_ITEM_COUNT);
+}
+
+proc_compat_t **proc_compat_get_all(int *count) {
+    struct pids_fetch *fetched;
+    proc_compat_t **result;
+    
+    fetched = procps_pids_reap(compat_info, PIDS_FETCH_TASKS_ONLY);
+    if (!fetched || !fetched->stacks) {
+        *count = 0;
+        return NULL;
+    }
+    
+    *count = fetched->counts->total;
+    result = malloc(*count * sizeof(proc_compat_t *));
+    
+    for (int i = 0; i < *count; i++) {
+        result[i] = malloc(sizeof(proc_compat_t));
+        struct pids_stack *stack = fetched->stacks[i];
+        
+        // Populate adapter
+        result[i]->tid = PIDS_VAL(COMPAT_TID, s_int, stack);
+        result[i]->ppid = PIDS_VAL(COMPAT_PPID, s_int, stack);
+        result[i]->state = PIDS_VAL(COMPAT_STATE, s_ch, stack);
+        result[i]->cmd = PIDS_VAL(COMPAT_CMD, str, stack);
+        result[i]->vm_rss = PIDS_VAL(COMPAT_VM_RSS, ul_int, stack);
+        result[i]->utime = PIDS_VAL(COMPAT_UTIME, ull_int, stack);
+        result[i]->stime = PIDS_VAL(COMPAT_STIME, ull_int, stack);
+        result[i]->_internal_stack = stack;
+    }
+    
+    return result;
+}
+
+void proc_compat_free(proc_compat_t **procs, int count) {
+    for (int i = 0; i < count; i++) {
+        free(procs[i]);
+    }
+    free(procs);
+}
+
+// Usage in your application
+int main(void) {
+    int count;
+    proc_compat_t **procs;
+    
+    proc_compat_init();
+    
+    procs = proc_compat_get_all(&count);
+    for (int i = 0; i < count; i++) {
+        printf("PID: %d, CMD: %s\n", procs[i]->tid, procs[i]->cmd);
+        
+        // Can pass to legacy functions expecting proc_t-like structure
+        legacy_display_process(procs[i]);
+    }
+    
+    proc_compat_free(procs, count);
+    procps_pids_unref(&compat_info);
+    
+    return 0;
+}
+```
+
+**Warnings about the compatibility approach:**
+- ⚠️ This is a **temporary solution** for gradual migration
+- ⚠️ You lose the performance benefits of the new API
+- ⚠️ Extra memory allocation and copying overhead
+- ⚠️ String pointers still reference library-owned memory
+- ⚠️ Plan to remove this layer and use the new API directly
+
+### Recommended Migration Path
+
+Instead of creating adapters, the recommended approach is:
+
+1. **Identify all code using `proc_t`**
+2. **Rewrite functions to accept `pids_stack *` and field indices**
+3. **Use the adapter layer only for isolated, hard-to-change legacy code**
+4. **Gradually eliminate the adapter as you refactor**
+
+The adapter pattern shown above should be a **last resort** for code you truly cannot modify immediately.
 
 ## Performance Considerations
 

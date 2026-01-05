@@ -48,6 +48,7 @@ int procps_compat_flags_to_items(unsigned flags, enum pids_item *items, int max_
         if (count < max_items) items[count++] = PIDS_TTY;
         if (count < max_items) items[count++] = PIDS_ID_PGRP;
         if (count < max_items) items[count++] = PIDS_ID_SESSION;
+        if (count < max_items) items[count++] = PIDS_ID_TPGID;
         if (count < max_items) items[count++] = PIDS_PRIORITY_RT;
         if (count < max_items) items[count++] = PIDS_SCHED_CLASS;
         if (count < max_items) items[count++] = PIDS_PROCESSOR;
@@ -261,13 +262,6 @@ static int find_item_index(enum pids_item *items, int num_items, enum pids_item 
     }
     return -1;
 }
-
-/* Helper macro to safely get value from stack */
-#define GET_VAL(item_enum, type, def_val) do { \
-    int idx = find_item_index(items, num_items, item_enum); \
-    if (idx >= 0) return PIDS_VAL(idx, type, stack); \
-    return def_val; \
-} while(0)
 
 /* Helper macro to safely copy string value from stack */
 #define COPY_STR(item_enum, dest) do { \
@@ -613,31 +607,37 @@ int procps_compat_stack_to_proc_t(
     idx = find_item_index(items, num_items, PIDS_SIGNALS);
     if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
         strncpy(proc->signal, PIDS_VAL(idx, str, stack), sizeof(proc->signal) - 1);
+        proc->signal[sizeof(proc->signal) - 1] = '\0';
     }
     
     idx = find_item_index(items, num_items, PIDS_SIGBLOCKED);
     if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
         strncpy(proc->blocked, PIDS_VAL(idx, str, stack), sizeof(proc->blocked) - 1);
+        proc->blocked[sizeof(proc->blocked) - 1] = '\0';
     }
     
     idx = find_item_index(items, num_items, PIDS_SIGIGNORE);
     if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
         strncpy(proc->sigignore, PIDS_VAL(idx, str, stack), sizeof(proc->sigignore) - 1);
+        proc->sigignore[sizeof(proc->sigignore) - 1] = '\0';
     }
     
     idx = find_item_index(items, num_items, PIDS_SIGCATCH);
     if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
         strncpy(proc->sigcatch, PIDS_VAL(idx, str, stack), sizeof(proc->sigcatch) - 1);
+        proc->sigcatch[sizeof(proc->sigcatch) - 1] = '\0';
     }
     
     idx = find_item_index(items, num_items, PIDS_SIGPENDING);
     if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
         strncpy(proc->_sigpnd, PIDS_VAL(idx, str, stack), sizeof(proc->_sigpnd) - 1);
+        proc->_sigpnd[sizeof(proc->_sigpnd) - 1] = '\0';
     }
     
     idx = find_item_index(items, num_items, PIDS_CAPS_PERMITTED);
     if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
         strncpy(proc->capprm, PIDS_VAL(idx, str, stack), sizeof(proc->capprm) - 1);
+        proc->capprm[sizeof(proc->capprm) - 1] = '\0';
     }
     
     return 0;
@@ -760,7 +760,13 @@ void procps_compat_freeproc(proc_t *proc)
     free(proc->exe);
     
     /* Note: environ_v, cmdline_v, cgroup_v would need special handling
-     * if they were filled by the compatibility layer */
+     * if they were filled by the compatibility layer. These vector fields
+     * require parsing the string versions into arrays, which is complex
+     * and rarely needed. Users needing these fields should:
+     * 1. Use PIDS_ENVIRON_V, PIDS_CMDLINE_V, PIDS_CGROUP_V directly with new API
+     * 2. Parse the string versions (environ, cmdline, cgroup) themselves
+     * 3. Use the old readproc.c functions if they are available in their version
+     */
     
     free(proc);
 }

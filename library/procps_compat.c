@@ -21,6 +21,14 @@
 /* Maximum number of pids_item enums we support in compatibility mode */
 #define COMPAT_MAX_ITEMS 256
 
+/*
+ * NOTE: This compatibility layer now uses the library's native
+ * procps_pids_stack_to_proc() function for conversion, which is
+ * exported as part of the library API. This provides a cleaner
+ * and more maintainable solution than the previous data-driven
+ * approach, while keeping the same functionality.
+ */
+
 /* Mapping structure for flag to items conversion */
 struct flag_item_map {
     unsigned flag;
@@ -236,42 +244,6 @@ int procps_compat_flags_to_items(unsigned flags, enum pids_item *items, int max_
     return count;
 }
 
-/* Helper to find an item in the items array and return its index */
-static int find_item_index(enum pids_item *items, int num_items, enum pids_item item)
-{
-    int i;
-    for (i = 0; i < num_items; i++) {
-        if (items[i] == item)
-            return i;
-    }
-    return -1;
-}
-
-/* Macro for setting numeric fields from pids_stack */
-#define SET_NUMERIC_FIELD(pids_item, proc_field, type) do { \
-    int idx = find_item_index(items, num_items, pids_item); \
-    if (idx >= 0) proc->proc_field = PIDS_VAL(idx, type, stack); \
-} while(0)
-
-/* Macro for setting string fields from pids_stack */
-#define SET_STRING_FIELD(pids_item, proc_field) do { \
-    int idx = find_item_index(items, num_items, pids_item); \
-    if (idx >= 0 && PIDS_VAL(idx, str, stack)) { \
-        proc->proc_field = strdup(PIDS_VAL(idx, str, stack)); \
-    } else { \
-        proc->proc_field = NULL; \
-    } \
-} while(0)
-
-/* Macro for setting fixed-size string fields from pids_stack */
-#define SET_FIXED_STRING_FIELD(pids_item, proc_field) do { \
-    int idx = find_item_index(items, num_items, pids_item); \
-    if (idx >= 0 && PIDS_VAL(idx, str, stack)) { \
-        strncpy(proc->proc_field, PIDS_VAL(idx, str, stack), sizeof(proc->proc_field) - 1); \
-        proc->proc_field[sizeof(proc->proc_field) - 1] = '\0'; \
-    } \
-} while(0)
-
 /* Convert a pids_stack to proc_t structure */
 int procps_compat_stack_to_proc_t(
     struct pids_stack *stack,
@@ -279,163 +251,8 @@ int procps_compat_stack_to_proc_t(
     enum pids_item *items,
     int num_items)
 {
-    if (!stack || !proc || !items)
-        return -1;
-    
-    /* Initialize proc_t to zero */
-    memset(proc, 0, sizeof(proc_t));
-    
-    /* Basic process IDs */
-    SET_NUMERIC_FIELD(PIDS_ID_TID, tid, s_int);
-    SET_NUMERIC_FIELD(PIDS_ID_PPID, ppid, s_int);
-    SET_NUMERIC_FIELD(PIDS_ID_TGID, tgid, s_int);
-    SET_NUMERIC_FIELD(PIDS_STATE, state, s_ch);
-    
-    /* Time-related fields */
-    SET_NUMERIC_FIELD(PIDS_TICS_USER, utime, ull_int);
-    SET_NUMERIC_FIELD(PIDS_TICS_SYSTEM, stime, ull_int);
-    SET_NUMERIC_FIELD(PIDS_TICS_USER_C, cutime, ull_int);
-    SET_NUMERIC_FIELD(PIDS_TICS_SYSTEM_C, cstime, ull_int);
-    SET_NUMERIC_FIELD(PIDS_TICS_BEGAN, start_time, ull_int);
-    SET_NUMERIC_FIELD(PIDS_TICS_BLKIO, blkio_tics, ull_int);
-    SET_NUMERIC_FIELD(PIDS_TICS_GUEST, gtime, ull_int);
-    SET_NUMERIC_FIELD(PIDS_TICS_GUEST_C, cgtime, ull_int);
-    
-    /* Priority and scheduling */
-    SET_NUMERIC_FIELD(PIDS_PRIORITY, priority, s_int);
-    SET_NUMERIC_FIELD(PIDS_NICE, nice, s_int);
-    SET_NUMERIC_FIELD(PIDS_PRIORITY_RT, rtprio, s_int);
-    SET_NUMERIC_FIELD(PIDS_SCHED_CLASS, sched, s_int);
-    
-    /* Memory fields */
-    SET_NUMERIC_FIELD(PIDS_MEM_VIRT_PGS, size, ul_int);
-    SET_NUMERIC_FIELD(PIDS_MEM_RES_PGS, resident, ul_int);
-    SET_NUMERIC_FIELD(PIDS_MEM_SHR_PGS, share, ul_int);
-    SET_NUMERIC_FIELD(PIDS_MEM_CODE_PGS, trs, ul_int);
-    SET_NUMERIC_FIELD(PIDS_MEM_DATA_PGS, drs, ul_int);
-    SET_NUMERIC_FIELD(PIDS_VM_SIZE, vm_size, ul_int);
-    SET_NUMERIC_FIELD(PIDS_VM_RSS, vm_rss, ul_int);
-    SET_NUMERIC_FIELD(PIDS_VM_RSS_ANON, vm_rss_anon, ul_int);
-    SET_NUMERIC_FIELD(PIDS_VM_RSS_FILE, vm_rss_file, ul_int);
-    SET_NUMERIC_FIELD(PIDS_VM_RSS_SHARED, vm_rss_shared, ul_int);
-    SET_NUMERIC_FIELD(PIDS_VM_DATA, vm_data, ul_int);
-    SET_NUMERIC_FIELD(PIDS_VM_STACK, vm_stack, ul_int);
-    SET_NUMERIC_FIELD(PIDS_VM_SWAP, vm_swap, ul_int);
-    SET_NUMERIC_FIELD(PIDS_VM_EXE, vm_exe, ul_int);
-    SET_NUMERIC_FIELD(PIDS_VM_LIB, vm_lib, ul_int);
-    SET_NUMERIC_FIELD(PIDS_RSS, rss, ul_int);
-    SET_NUMERIC_FIELD(PIDS_RSS_RLIM, rss_rlim, ul_int);
-    SET_NUMERIC_FIELD(PIDS_VSIZE_BYTES, vsize, ul_int);
-    
-    /* Other numeric fields */
-    SET_NUMERIC_FIELD(PIDS_FLAGS, flags, ul_int);
-    SET_NUMERIC_FIELD(PIDS_FLT_MIN, min_flt, ul_int);
-    SET_NUMERIC_FIELD(PIDS_FLT_MAJ, maj_flt, ul_int);
-    SET_NUMERIC_FIELD(PIDS_FLT_MIN_C, cmin_flt, ul_int);
-    SET_NUMERIC_FIELD(PIDS_FLT_MAJ_C, cmaj_flt, ul_int);
-    SET_NUMERIC_FIELD(PIDS_NLWP, nlwp, s_int);
-    SET_NUMERIC_FIELD(PIDS_TTY, tty, s_int);
-    SET_NUMERIC_FIELD(PIDS_ID_PGRP, pgrp, s_int);
-    SET_NUMERIC_FIELD(PIDS_ID_SESSION, session, s_int);
-    SET_NUMERIC_FIELD(PIDS_ID_TPGID, tpgid, s_int);
-    SET_NUMERIC_FIELD(PIDS_EXIT_SIGNAL, exit_signal, s_int);
-    SET_NUMERIC_FIELD(PIDS_PROCESSOR, processor, s_int);
-    
-    /* Address fields */
-    SET_NUMERIC_FIELD(PIDS_ADDR_CODE_START, start_code, ul_int);
-    SET_NUMERIC_FIELD(PIDS_ADDR_CODE_END, end_code, ul_int);
-    SET_NUMERIC_FIELD(PIDS_ADDR_STACK_START, start_stack, ul_int);
-    SET_NUMERIC_FIELD(PIDS_ADDR_CURR_ESP, kstk_esp, ul_int);
-    SET_NUMERIC_FIELD(PIDS_ADDR_CURR_EIP, kstk_eip, ul_int);
-    
-    /* UIDs and GIDs */
-    SET_NUMERIC_FIELD(PIDS_ID_EUID, euid, u_int);
-    SET_NUMERIC_FIELD(PIDS_ID_EGID, egid, u_int);
-    SET_NUMERIC_FIELD(PIDS_ID_RUID, ruid, u_int);
-    SET_NUMERIC_FIELD(PIDS_ID_RGID, rgid, u_int);
-    SET_NUMERIC_FIELD(PIDS_ID_SUID, suid, u_int);
-    SET_NUMERIC_FIELD(PIDS_ID_SGID, sgid, u_int);
-    SET_NUMERIC_FIELD(PIDS_ID_FUID, fuid, u_int);
-    SET_NUMERIC_FIELD(PIDS_ID_FGID, fgid, u_int);
-    
-    /* OOM fields */
-    SET_NUMERIC_FIELD(PIDS_OOM_SCORE, oom_score, s_int);
-    SET_NUMERIC_FIELD(PIDS_OOM_ADJ, oom_adj, s_int);
-    
-    /* IO fields */
-    SET_NUMERIC_FIELD(PIDS_IO_READ_CHARS, rchar, ul_int);
-    SET_NUMERIC_FIELD(PIDS_IO_WRITE_CHARS, wchar, ul_int);
-    SET_NUMERIC_FIELD(PIDS_IO_READ_OPS, syscr, ul_int);
-    SET_NUMERIC_FIELD(PIDS_IO_WRITE_OPS, syscw, ul_int);
-    SET_NUMERIC_FIELD(PIDS_IO_READ_BYTES, read_bytes, ul_int);
-    SET_NUMERIC_FIELD(PIDS_IO_WRITE_BYTES, write_bytes, ul_int);
-    SET_NUMERIC_FIELD(PIDS_IO_WRITE_CBYTES, cancelled_write_bytes, ul_int);
-    
-    /* Autogroup fields */
-    SET_NUMERIC_FIELD(PIDS_AUTOGRP_ID, autogrp_id, s_int);
-    SET_NUMERIC_FIELD(PIDS_AUTOGRP_NICE, autogrp_nice, s_int);
-    SET_NUMERIC_FIELD(PIDS_ID_LOGIN, luid, s_int);
-    SET_NUMERIC_FIELD(PIDS_OPEN_FILES, fds, s_int);
-    
-    /* Smaps fields */
-    SET_NUMERIC_FIELD(PIDS_SMAP_RSS, smap_Rss, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_PSS, smap_Pss, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_PSS_ANON, smap_Pss_Anon, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_PSS_FILE, smap_Pss_File, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_PSS_SHMEM, smap_Pss_Shmem, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_SHR_CLEAN, smap_Shared_Clean, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_SHR_DIRTY, smap_Shared_Dirty, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_PRV_CLEAN, smap_Private_Clean, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_PRV_DIRTY, smap_Private_Dirty, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_REFERENCED, smap_Referenced, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_ANONYMOUS, smap_Anonymous, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_LAZY_FREE, smap_LazyFree, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_HUGE_ANON, smap_AnonHugePages, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_HUGE_SHMEM, smap_ShmemPmdMapped, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_HUGE_FILE, smap_FilePmdMapped, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_HUGE_TLBSHR, smap_Shared_Hugetlb, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_HUGE_TLBPRV, smap_Private_Hugetlb, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_SWAP, smap_Swap, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_SWAP_PSS, smap_SwapPss, ul_int);
-    SET_NUMERIC_FIELD(PIDS_SMAP_LOCKED, smap_Locked, ul_int);
-    
-    /* String fields */
-    SET_STRING_FIELD(PIDS_CMD, cmd);
-    SET_STRING_FIELD(PIDS_CMDLINE, cmdline);
-    SET_STRING_FIELD(PIDS_ENVIRON, environ);
-    SET_STRING_FIELD(PIDS_CGROUP, cgroup);
-    SET_STRING_FIELD(PIDS_CGNAME, cgname);
-    SET_STRING_FIELD(PIDS_SUPGIDS, supgid);
-    SET_STRING_FIELD(PIDS_SUPGROUPS, supgrp);
-    SET_STRING_FIELD(PIDS_ID_EUSER, euser);
-    SET_STRING_FIELD(PIDS_ID_RUSER, ruser);
-    SET_STRING_FIELD(PIDS_ID_SUSER, suser);
-    SET_STRING_FIELD(PIDS_ID_FUSER, fuser);
-    SET_STRING_FIELD(PIDS_ID_EGROUP, egroup);
-    SET_STRING_FIELD(PIDS_ID_RGROUP, rgroup);
-    SET_STRING_FIELD(PIDS_ID_SGROUP, sgroup);
-    SET_STRING_FIELD(PIDS_ID_FGROUP, fgroup);
-    SET_STRING_FIELD(PIDS_SD_MACH, sd_mach);
-    SET_STRING_FIELD(PIDS_SD_OUID, sd_ouid);
-    SET_STRING_FIELD(PIDS_SD_SEAT, sd_seat);
-    SET_STRING_FIELD(PIDS_SD_SESS, sd_sess);
-    SET_STRING_FIELD(PIDS_SD_SLICE, sd_slice);
-    SET_STRING_FIELD(PIDS_SD_UNIT, sd_unit);
-    SET_STRING_FIELD(PIDS_SD_UUNIT, sd_uunit);
-    SET_STRING_FIELD(PIDS_DOCKER_ID, dockerid);
-    SET_STRING_FIELD(PIDS_DOCKER_ID_64, dockerid_64);
-    SET_STRING_FIELD(PIDS_LXCNAME, lxcname);
-    SET_STRING_FIELD(PIDS_EXE, exe);
-    
-    /* Fixed-size string fields (signal masks, etc.) */
-    SET_FIXED_STRING_FIELD(PIDS_SIGNALS, signal);
-    SET_FIXED_STRING_FIELD(PIDS_SIGBLOCKED, blocked);
-    SET_FIXED_STRING_FIELD(PIDS_SIGIGNORE, sigignore);
-    SET_FIXED_STRING_FIELD(PIDS_SIGCATCH, sigcatch);
-    SET_FIXED_STRING_FIELD(PIDS_SIGPENDING, _sigpnd);
-    SET_FIXED_STRING_FIELD(PIDS_CAPS_PERMITTED, capprm);
-    
-    return 0;
+    /* Use the library's native conversion function */
+    return procps_pids_stack_to_proc(stack, proc, items, num_items);
 }
 
 /* Initialize process table reading with compatibility mode */

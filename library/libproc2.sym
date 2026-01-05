@@ -84,4 +84,5 @@ LIBPROC_2.3 {
 	procps_compat_openproc;
 	procps_compat_readproc;
 	procps_compat_stack_to_proc_t;
+	procps_pids_stack_to_proc;
 } LIBPROC_2.2;

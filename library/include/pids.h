@@ -22,6 +22,8 @@
 #ifndef PROCPS_PIDS_H
 #define PROCPS_PIDS_H
 
+#include "readproc.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -281,6 +283,12 @@ struct pids_stack **procps_pids_sort (
     int numstacked,
     enum pids_item sortitem,
     enum pids_sort_order order);
+
+int procps_pids_stack_to_proc (
+    const struct pids_stack *stack,
+    proc_t *proc,
+    const enum pids_item *items,
+    int numitems);
 
 
 #ifdef XTRA_PROCPS_DEBUG

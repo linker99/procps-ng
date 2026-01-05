@@ -1776,3 +1776,136 @@ PROCPS_EXPORT struct pids_result *xtra_pids_val (
     }
     return &stack->head[relative_enum];
 } // end: xtra_pids_val
+
+
+/*
+ * procps_pids_stack_to_proc():
+ *
+ * Convert a pids_stack back to a proc_t structure for compatibility
+ * with legacy code that uses the old proc_t API.
+ *
+ * This function provides a reverse conversion from the new pids_stack
+ * format to the old proc_t format, useful for migrating code from
+ * v3.3.16 API to v4.0.4+ API.
+ *
+ * Returns: 0 on success, -1 on error
+ */
+PROCPS_EXPORT int procps_pids_stack_to_proc (
+        const struct pids_stack *stack,
+        proc_t *proc,
+        const enum pids_item *items,
+        int numitems)
+{
+    struct pids_result *this;
+    int i, idx;
+    
+    if (!stack || !proc || !items || numitems < 1) {
+        errno = EINVAL;
+        return -1;
+    }
+    
+    /* Initialize proc_t to zero */
+    memset(proc, 0, sizeof(proc_t));
+    
+    /* Helper function to find item index in the stack */
+    #define FIND_ITEM(item_enum) ({ \
+        int found_idx = -1; \
+        for (idx = 0; idx < numitems; idx++) { \
+            if (items[idx] == item_enum) { \
+                found_idx = idx; \
+                break; \
+            } \
+        } \
+        found_idx; \
+    })
+    
+    /* Helper macro to set numeric fields */
+    #define SET_NUM(item_enum, field, type) do { \
+        if ((idx = FIND_ITEM(item_enum)) >= 0) \
+            proc->field = stack->head[idx].result.type; \
+    } while(0)
+    
+    /* Helper macro to set string fields */
+    #define SET_STR(item_enum, field) do { \
+        if ((idx = FIND_ITEM(item_enum)) >= 0 && stack->head[idx].result.str) \
+            proc->field = strdup(stack->head[idx].result.str); \
+    } while(0)
+    
+    /* Helper macro to set fixed string fields */
+    #define SET_FIXSTR(item_enum, field) do { \
+        if ((idx = FIND_ITEM(item_enum)) >= 0 && stack->head[idx].result.str) { \
+            strncpy(proc->field, stack->head[idx].result.str, sizeof(proc->field) - 1); \
+            proc->field[sizeof(proc->field) - 1] = '\0'; \
+        } \
+    } while(0)
+    
+    /* Process IDs */
+    SET_NUM(PIDS_ID_TID, tid, s_int);
+    SET_NUM(PIDS_ID_PPID, ppid, s_int);
+    SET_NUM(PIDS_ID_TGID, tgid, s_int);
+    SET_NUM(PIDS_STATE, state, s_ch);
+    
+    /* Time fields */
+    SET_NUM(PIDS_TICS_USER, utime, ull_int);
+    SET_NUM(PIDS_TICS_SYSTEM, stime, ull_int);
+    SET_NUM(PIDS_TICS_USER_C, cutime, ull_int);
+    SET_NUM(PIDS_TICS_SYSTEM_C, cstime, ull_int);
+    SET_NUM(PIDS_TICS_BEGAN, start_time, ull_int);
+    SET_NUM(PIDS_TICS_BLKIO, blkio_tics, ull_int);
+    SET_NUM(PIDS_TICS_GUEST, gtime, ull_int);
+    SET_NUM(PIDS_TICS_GUEST_C, cgtime, ull_int);
+    
+    /* Priority and scheduling */
+    SET_NUM(PIDS_PRIORITY, priority, s_int);
+    SET_NUM(PIDS_NICE, nice, s_int);
+    SET_NUM(PIDS_PRIORITY_RT, rtprio, s_int);
+    SET_NUM(PIDS_SCHED_CLASS, sched, s_int);
+    
+    /* Memory fields */
+    SET_NUM(PIDS_MEM_VIRT_PGS, size, ul_int);
+    SET_NUM(PIDS_MEM_RES_PGS, resident, ul_int);
+    SET_NUM(PIDS_MEM_SHR_PGS, share, ul_int);
+    SET_NUM(PIDS_MEM_CODE_PGS, trs, ul_int);
+    SET_NUM(PIDS_MEM_DATA_PGS, drs, ul_int);
+    SET_NUM(PIDS_VM_SIZE, vm_size, ul_int);
+    SET_NUM(PIDS_VM_RSS, vm_rss, ul_int);
+    SET_NUM(PIDS_VM_DATA, vm_data, ul_int);
+    SET_NUM(PIDS_VM_STACK, vm_stack, ul_int);
+    SET_NUM(PIDS_RSS, rss, ul_int);
+    SET_NUM(PIDS_VSIZE_BYTES, vsize, ul_int);
+    
+    /* Other numeric fields */
+    SET_NUM(PIDS_FLAGS, flags, ul_int);
+    SET_NUM(PIDS_FLT_MIN, min_flt, ul_int);
+    SET_NUM(PIDS_FLT_MAJ, maj_flt, ul_int);
+    SET_NUM(PIDS_NLWP, nlwp, s_int);
+    SET_NUM(PIDS_TTY, tty, s_int);
+    SET_NUM(PIDS_ID_PGRP, pgrp, s_int);
+    SET_NUM(PIDS_ID_SESSION, session, s_int);
+    SET_NUM(PIDS_PROCESSOR, processor, s_int);
+    
+    /* UIDs and GIDs */
+    SET_NUM(PIDS_ID_EUID, euid, u_int);
+    SET_NUM(PIDS_ID_EGID, egid, u_int);
+    SET_NUM(PIDS_ID_RUID, ruid, u_int);
+    SET_NUM(PIDS_ID_RGID, rgid, u_int);
+    
+    /* String fields */
+    SET_STR(PIDS_CMD, cmd);
+    SET_STR(PIDS_CMDLINE, cmdline);
+    SET_STR(PIDS_ID_EUSER, euser);
+    SET_STR(PIDS_ID_EGROUP, egroup);
+    
+    /* Fixed string fields */
+    SET_FIXSTR(PIDS_SIGNALS, signal);
+    SET_FIXSTR(PIDS_SIGBLOCKED, blocked);
+    SET_FIXSTR(PIDS_SIGIGNORE, sigignore);
+    SET_FIXSTR(PIDS_SIGCATCH, sigcatch);
+    
+    #undef FIND_ITEM
+    #undef SET_NUM
+    #undef SET_STR
+    #undef SET_FIXSTR
+    
+    return 0;
+} // end: procps_pids_stack_to_proc

@@ -77,3 +77,6 @@ src/tests/test_strutils
 *.sum
 *.exe
 *.mo
+example_compat
+example_newapi
+test_compat

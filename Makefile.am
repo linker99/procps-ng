@@ -99,6 +99,9 @@ EXTRA_DIST = \
 	local/git-version-gen \
 	doc/CodingStyle.md \
 	doc/TODO \
+	doc/MIGRATION.md \
+	doc/example_compat.c \
+	doc/example_newapi.c \
 	src/ps/HACKING \
 	src/ps/regression \
 	$(DIST_MAN_POTS)
@@ -112,7 +115,8 @@ procpsngdir = $(docdir)
 dist_procpsng_DATA = \
 	doc/bugs.md \
 	doc/FAQ \
-	doc/libproc.supp
+	doc/libproc.supp \
+	doc/MIGRATION.md
 
 if BUILD_PIDOF
 if !CYGWIN
@@ -287,6 +291,8 @@ library_libproc2_la_SOURCES = \
 	library/include/numa.h \
 	library/pids.c \
 	library/include/pids.h \
+	library/procps_compat.c \
+	library/include/procps_compat.h \
 	library/pwcache.c \
 	library/include/pwcache.h \
 	library/readproc.c \
@@ -313,6 +319,7 @@ library_libproc2_la_include_HEADERS = \
 	library/include/meminfo.h \
 	library/include/misc.h \
 	library/include/pids.h \
+	library/include/procps_compat.h \
 	library/include/slabinfo.h \
 	library/include/stat.h \
 	library/include/vmstat.h \

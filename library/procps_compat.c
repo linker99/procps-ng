@@ -12,15 +12,204 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <stddef.h>
 
 #include "procps_compat.h"
 #include "pids.h"
 #include "readproc.h"
 
+/* Maximum number of pids_item enums we support in compatibility mode */
+#define COMPAT_MAX_ITEMS 256
+
+/* Mapping structure for flag to items conversion */
+struct flag_item_map {
+    unsigned flag;
+    enum pids_item item;
+};
+
+/* Static mapping table for PROC_* flags to pids_item enums */
+static const struct flag_item_map flag_mappings[] = {
+    /* PROC_FILLSTAT items */
+    {PROC_FILLSTAT, PIDS_TICS_USER},
+    {PROC_FILLSTAT, PIDS_TICS_SYSTEM},
+    {PROC_FILLSTAT, PIDS_TICS_USER_C},
+    {PROC_FILLSTAT, PIDS_TICS_SYSTEM_C},
+    {PROC_FILLSTAT, PIDS_TICS_BEGAN},
+    {PROC_FILLSTAT, PIDS_TICS_BLKIO},
+    {PROC_FILLSTAT, PIDS_TICS_GUEST},
+    {PROC_FILLSTAT, PIDS_TICS_GUEST_C},
+    {PROC_FILLSTAT, PIDS_PRIORITY},
+    {PROC_FILLSTAT, PIDS_NICE},
+    {PROC_FILLSTAT, PIDS_NLWP},
+    {PROC_FILLSTAT, PIDS_TTY},
+    {PROC_FILLSTAT, PIDS_ID_PGRP},
+    {PROC_FILLSTAT, PIDS_ID_SESSION},
+    {PROC_FILLSTAT, PIDS_ID_TPGID},
+    {PROC_FILLSTAT, PIDS_PRIORITY_RT},
+    {PROC_FILLSTAT, PIDS_SCHED_CLASS},
+    {PROC_FILLSTAT, PIDS_PROCESSOR},
+    {PROC_FILLSTAT, PIDS_VSIZE_BYTES},
+    {PROC_FILLSTAT, PIDS_RSS},
+    {PROC_FILLSTAT, PIDS_RSS_RLIM},
+    {PROC_FILLSTAT, PIDS_FLAGS},
+    {PROC_FILLSTAT, PIDS_FLT_MIN},
+    {PROC_FILLSTAT, PIDS_FLT_MAJ},
+    {PROC_FILLSTAT, PIDS_FLT_MIN_C},
+    {PROC_FILLSTAT, PIDS_FLT_MAJ_C},
+    {PROC_FILLSTAT, PIDS_ADDR_CODE_START},
+    {PROC_FILLSTAT, PIDS_ADDR_CODE_END},
+    {PROC_FILLSTAT, PIDS_ADDR_STACK_START},
+    {PROC_FILLSTAT, PIDS_ADDR_CURR_ESP},
+    {PROC_FILLSTAT, PIDS_ADDR_CURR_EIP},
+    {PROC_FILLSTAT, PIDS_WCHAN_NAME},
+    {PROC_FILLSTAT, PIDS_EXIT_SIGNAL},
+    
+    /* PROC_FILLMEM items */
+    {PROC_FILLMEM, PIDS_MEM_VIRT_PGS},
+    {PROC_FILLMEM, PIDS_MEM_RES_PGS},
+    {PROC_FILLMEM, PIDS_MEM_SHR_PGS},
+    {PROC_FILLMEM, PIDS_MEM_CODE_PGS},
+    {PROC_FILLMEM, PIDS_MEM_DATA_PGS},
+    {PROC_FILLMEM, PIDS_MEM_VIRT},
+    {PROC_FILLMEM, PIDS_MEM_RES},
+    {PROC_FILLMEM, PIDS_MEM_SHR},
+    {PROC_FILLMEM, PIDS_MEM_CODE},
+    {PROC_FILLMEM, PIDS_MEM_DATA},
+    
+    /* PROC_FILLSTATUS items */
+    {PROC_FILLSTATUS, PIDS_VM_SIZE},
+    {PROC_FILLSTATUS, PIDS_VM_RSS},
+    {PROC_FILLSTATUS, PIDS_VM_RSS_ANON},
+    {PROC_FILLSTATUS, PIDS_VM_RSS_FILE},
+    {PROC_FILLSTATUS, PIDS_VM_RSS_SHARED},
+    {PROC_FILLSTATUS, PIDS_VM_DATA},
+    {PROC_FILLSTATUS, PIDS_VM_STACK},
+    {PROC_FILLSTATUS, PIDS_VM_SWAP},
+    {PROC_FILLSTATUS, PIDS_VM_EXE},
+    {PROC_FILLSTATUS, PIDS_VM_LIB},
+    {PROC_FILLSTATUS, PIDS_VM_RSS_LOCKED},
+    {PROC_FILLSTATUS, PIDS_SIGBLOCKED},
+    {PROC_FILLSTATUS, PIDS_SIGCATCH},
+    {PROC_FILLSTATUS, PIDS_SIGIGNORE},
+    {PROC_FILLSTATUS, PIDS_SIGNALS},
+    {PROC_FILLSTATUS, PIDS_SIGPENDING},
+    {PROC_FILLSTATUS, PIDS_CAPS_PERMITTED},
+    {PROC_FILLSTATUS, PIDS_ID_EUID},
+    {PROC_FILLSTATUS, PIDS_ID_RUID},
+    {PROC_FILLSTATUS, PIDS_ID_SUID},
+    {PROC_FILLSTATUS, PIDS_ID_FUID},
+    {PROC_FILLSTATUS, PIDS_ID_EGID},
+    {PROC_FILLSTATUS, PIDS_ID_RGID},
+    {PROC_FILLSTATUS, PIDS_ID_SGID},
+    {PROC_FILLSTATUS, PIDS_ID_FGID},
+    
+    /* PROC_FILLARG items */
+    {PROC_FILLARG, PIDS_CMDLINE},
+    {PROC_FILLARG, PIDS_CMDLINE_V},
+    
+    /* PROC_FILLENV items */
+    {PROC_FILLENV, PIDS_ENVIRON},
+    {PROC_FILLENV, PIDS_ENVIRON_V},
+    
+    /* PROC_FILLUSR items */
+    {PROC_FILLUSR, PIDS_ID_EUSER},
+    {PROC_FILLUSR, PIDS_ID_RUSER},
+    {PROC_FILLUSR, PIDS_ID_SUSER},
+    {PROC_FILLUSR, PIDS_ID_FUSER},
+    
+    /* PROC_FILLGRP items */
+    {PROC_FILLGRP, PIDS_ID_EGROUP},
+    {PROC_FILLGRP, PIDS_ID_RGROUP},
+    {PROC_FILLGRP, PIDS_ID_SGROUP},
+    {PROC_FILLGRP, PIDS_ID_FGROUP},
+    
+    /* PROC_FILLCGROUP items */
+    {PROC_FILLCGROUP, PIDS_CGROUP},
+    {PROC_FILLCGROUP, PIDS_CGROUP_V},
+    {PROC_FILLCGROUP, PIDS_CGNAME},
+    
+    /* PROC_FILLOOM items */
+    {PROC_FILLOOM, PIDS_OOM_SCORE},
+    {PROC_FILLOOM, PIDS_OOM_ADJ},
+    
+    /* PROC_FILLNS items */
+    {PROC_FILLNS, PIDS_NS_IPC},
+    {PROC_FILLNS, PIDS_NS_MNT},
+    {PROC_FILLNS, PIDS_NS_NET},
+    {PROC_FILLNS, PIDS_NS_PID},
+    {PROC_FILLNS, PIDS_NS_USER},
+    {PROC_FILLNS, PIDS_NS_UTS},
+    
+    /* PROC_FILLSYSTEMD items */
+    {PROC_FILLSYSTEMD, PIDS_SD_MACH},
+    {PROC_FILLSYSTEMD, PIDS_SD_OUID},
+    {PROC_FILLSYSTEMD, PIDS_SD_SEAT},
+    {PROC_FILLSYSTEMD, PIDS_SD_SESS},
+    {PROC_FILLSYSTEMD, PIDS_SD_SLICE},
+    {PROC_FILLSYSTEMD, PIDS_SD_UNIT},
+    {PROC_FILLSYSTEMD, PIDS_SD_UUNIT},
+    
+    /* PROC_FILL_LXC items */
+    {PROC_FILL_LXC, PIDS_LXCNAME},
+    
+    /* PROC_FILL_LUID items */
+    {PROC_FILL_LUID, PIDS_ID_LOGIN},
+    
+    /* PROC_FILL_EXE items */
+    {PROC_FILL_EXE, PIDS_EXE},
+    
+    /* PROC_FILLIO items */
+    {PROC_FILLIO, PIDS_IO_READ_BYTES},
+    {PROC_FILLIO, PIDS_IO_WRITE_BYTES},
+    {PROC_FILLIO, PIDS_IO_READ_CHARS},
+    {PROC_FILLIO, PIDS_IO_WRITE_CHARS},
+    {PROC_FILLIO, PIDS_IO_READ_OPS},
+    {PROC_FILLIO, PIDS_IO_WRITE_OPS},
+    {PROC_FILLIO, PIDS_IO_WRITE_CBYTES},
+    
+    /* PROC_FILLSMAPS items */
+    {PROC_FILLSMAPS, PIDS_SMAP_RSS},
+    {PROC_FILLSMAPS, PIDS_SMAP_PSS},
+    {PROC_FILLSMAPS, PIDS_SMAP_PSS_ANON},
+    {PROC_FILLSMAPS, PIDS_SMAP_PSS_FILE},
+    {PROC_FILLSMAPS, PIDS_SMAP_PSS_SHMEM},
+    {PROC_FILLSMAPS, PIDS_SMAP_SHR_CLEAN},
+    {PROC_FILLSMAPS, PIDS_SMAP_SHR_DIRTY},
+    {PROC_FILLSMAPS, PIDS_SMAP_PRV_CLEAN},
+    {PROC_FILLSMAPS, PIDS_SMAP_PRV_DIRTY},
+    {PROC_FILLSMAPS, PIDS_SMAP_REFERENCED},
+    {PROC_FILLSMAPS, PIDS_SMAP_ANONYMOUS},
+    {PROC_FILLSMAPS, PIDS_SMAP_LAZY_FREE},
+    {PROC_FILLSMAPS, PIDS_SMAP_HUGE_ANON},
+    {PROC_FILLSMAPS, PIDS_SMAP_HUGE_SHMEM},
+    {PROC_FILLSMAPS, PIDS_SMAP_HUGE_FILE},
+    {PROC_FILLSMAPS, PIDS_SMAP_HUGE_TLBSHR},
+    {PROC_FILLSMAPS, PIDS_SMAP_HUGE_TLBPRV},
+    {PROC_FILLSMAPS, PIDS_SMAP_SWAP},
+    {PROC_FILLSMAPS, PIDS_SMAP_SWAP_PSS},
+    {PROC_FILLSMAPS, PIDS_SMAP_LOCKED},
+    
+    /* PROC_FILLAUTOGRP items */
+    {PROC_FILLAUTOGRP, PIDS_AUTOGRP_ID},
+    {PROC_FILLAUTOGRP, PIDS_AUTOGRP_NICE},
+    
+    /* PROC_FILL_SUPGRP items */
+    {PROC_FILL_SUPGRP, PIDS_SUPGIDS},
+    {PROC_FILL_SUPGRP, PIDS_SUPGROUPS},
+    
+    /* PROC_FILL_DOCKER items */
+    {PROC_FILL_DOCKER, PIDS_DOCKER_ID},
+    {PROC_FILL_DOCKER, PIDS_DOCKER_ID_64},
+    
+    /* PROC_FILL_FDS items */
+    {PROC_FILL_FDS, PIDS_OPEN_FILES},
+};
+
 /* Helper function to map old PROC_* flags to pids_item array */
 int procps_compat_flags_to_items(unsigned flags, enum pids_item *items, int max_items)
 {
     int count = 0;
+    size_t i;
     
     if (!items || max_items < 1)
         return 0;
@@ -32,219 +221,13 @@ int procps_compat_flags_to_items(unsigned flags, enum pids_item *items, int max_
     if (count < max_items) items[count++] = PIDS_ID_TGID;
     if (count < max_items) items[count++] = PIDS_STATE;
     
-    /* PROC_FILLSTAT items */
-    if (flags & PROC_FILLSTAT) {
-        if (count < max_items) items[count++] = PIDS_TICS_USER;
-        if (count < max_items) items[count++] = PIDS_TICS_SYSTEM;
-        if (count < max_items) items[count++] = PIDS_TICS_USER_C;
-        if (count < max_items) items[count++] = PIDS_TICS_SYSTEM_C;
-        if (count < max_items) items[count++] = PIDS_TICS_BEGAN;
-        if (count < max_items) items[count++] = PIDS_TICS_BLKIO;
-        if (count < max_items) items[count++] = PIDS_TICS_GUEST;
-        if (count < max_items) items[count++] = PIDS_TICS_GUEST_C;
-        if (count < max_items) items[count++] = PIDS_PRIORITY;
-        if (count < max_items) items[count++] = PIDS_NICE;
-        if (count < max_items) items[count++] = PIDS_NLWP;
-        if (count < max_items) items[count++] = PIDS_TTY;
-        if (count < max_items) items[count++] = PIDS_ID_PGRP;
-        if (count < max_items) items[count++] = PIDS_ID_SESSION;
-        if (count < max_items) items[count++] = PIDS_ID_TPGID;
-        if (count < max_items) items[count++] = PIDS_PRIORITY_RT;
-        if (count < max_items) items[count++] = PIDS_SCHED_CLASS;
-        if (count < max_items) items[count++] = PIDS_PROCESSOR;
-        if (count < max_items) items[count++] = PIDS_VSIZE_BYTES;
-        if (count < max_items) items[count++] = PIDS_RSS;
-        if (count < max_items) items[count++] = PIDS_RSS_RLIM;
-        if (count < max_items) items[count++] = PIDS_FLAGS;
-        if (count < max_items) items[count++] = PIDS_FLT_MIN;
-        if (count < max_items) items[count++] = PIDS_FLT_MAJ;
-        if (count < max_items) items[count++] = PIDS_FLT_MIN_C;
-        if (count < max_items) items[count++] = PIDS_FLT_MAJ_C;
-        if (count < max_items) items[count++] = PIDS_ADDR_CODE_START;
-        if (count < max_items) items[count++] = PIDS_ADDR_CODE_END;
-        if (count < max_items) items[count++] = PIDS_ADDR_STACK_START;
-        if (count < max_items) items[count++] = PIDS_ADDR_CURR_ESP;
-        if (count < max_items) items[count++] = PIDS_ADDR_CURR_EIP;
-        if (count < max_items) items[count++] = PIDS_WCHAN_NAME;
-        if (count < max_items) items[count++] = PIDS_EXIT_SIGNAL;
-    }
-    
-    /* PROC_FILLMEM items */
-    if (flags & PROC_FILLMEM) {
-        if (count < max_items) items[count++] = PIDS_MEM_VIRT_PGS;
-        if (count < max_items) items[count++] = PIDS_MEM_RES_PGS;
-        if (count < max_items) items[count++] = PIDS_MEM_SHR_PGS;
-        if (count < max_items) items[count++] = PIDS_MEM_CODE_PGS;
-        if (count < max_items) items[count++] = PIDS_MEM_DATA_PGS;
-        if (count < max_items) items[count++] = PIDS_MEM_VIRT;
-        if (count < max_items) items[count++] = PIDS_MEM_RES;
-        if (count < max_items) items[count++] = PIDS_MEM_SHR;
-        if (count < max_items) items[count++] = PIDS_MEM_CODE;
-        if (count < max_items) items[count++] = PIDS_MEM_DATA;
-    }
-    
-    /* PROC_FILLSTATUS items */
-    if (flags & PROC_FILLSTATUS) {
-        if (count < max_items) items[count++] = PIDS_VM_SIZE;
-        if (count < max_items) items[count++] = PIDS_VM_RSS;
-        if (count < max_items) items[count++] = PIDS_VM_RSS_ANON;
-        if (count < max_items) items[count++] = PIDS_VM_RSS_FILE;
-        if (count < max_items) items[count++] = PIDS_VM_RSS_SHARED;
-        if (count < max_items) items[count++] = PIDS_VM_DATA;
-        if (count < max_items) items[count++] = PIDS_VM_STACK;
-        if (count < max_items) items[count++] = PIDS_VM_SWAP;
-        if (count < max_items) items[count++] = PIDS_VM_EXE;
-        if (count < max_items) items[count++] = PIDS_VM_LIB;
-        if (count < max_items) items[count++] = PIDS_VM_RSS_LOCKED;
-        if (count < max_items) items[count++] = PIDS_SIGBLOCKED;
-        if (count < max_items) items[count++] = PIDS_SIGCATCH;
-        if (count < max_items) items[count++] = PIDS_SIGIGNORE;
-        if (count < max_items) items[count++] = PIDS_SIGNALS;
-        if (count < max_items) items[count++] = PIDS_SIGPENDING;
-        if (count < max_items) items[count++] = PIDS_CAPS_PERMITTED;
-        if (count < max_items) items[count++] = PIDS_ID_EUID;
-        if (count < max_items) items[count++] = PIDS_ID_RUID;
-        if (count < max_items) items[count++] = PIDS_ID_SUID;
-        if (count < max_items) items[count++] = PIDS_ID_FUID;
-        if (count < max_items) items[count++] = PIDS_ID_EGID;
-        if (count < max_items) items[count++] = PIDS_ID_RGID;
-        if (count < max_items) items[count++] = PIDS_ID_SGID;
-        if (count < max_items) items[count++] = PIDS_ID_FGID;
-    }
-    
-    /* PROC_FILLARG items */
-    if (flags & PROC_FILLARG) {
-        if (count < max_items) items[count++] = PIDS_CMDLINE;
-        if (count < max_items) items[count++] = PIDS_CMDLINE_V;
-    }
-    
-    /* PROC_FILLENV items */
-    if (flags & PROC_FILLENV) {
-        if (count < max_items) items[count++] = PIDS_ENVIRON;
-        if (count < max_items) items[count++] = PIDS_ENVIRON_V;
-    }
-    
-    /* PROC_FILLUSR items */
-    if (flags & PROC_FILLUSR) {
-        if (count < max_items) items[count++] = PIDS_ID_EUSER;
-        if (count < max_items) items[count++] = PIDS_ID_RUSER;
-        if (count < max_items) items[count++] = PIDS_ID_SUSER;
-        if (count < max_items) items[count++] = PIDS_ID_FUSER;
-    }
-    
-    /* PROC_FILLGRP items */
-    if (flags & PROC_FILLGRP) {
-        if (count < max_items) items[count++] = PIDS_ID_EGROUP;
-        if (count < max_items) items[count++] = PIDS_ID_RGROUP;
-        if (count < max_items) items[count++] = PIDS_ID_SGROUP;
-        if (count < max_items) items[count++] = PIDS_ID_FGROUP;
-    }
-    
-    /* PROC_FILLCGROUP items */
-    if (flags & PROC_FILLCGROUP) {
-        if (count < max_items) items[count++] = PIDS_CGROUP;
-        if (count < max_items) items[count++] = PIDS_CGROUP_V;
-        if (count < max_items) items[count++] = PIDS_CGNAME;
-    }
-    
-    /* PROC_FILLOOM items */
-    if (flags & PROC_FILLOOM) {
-        if (count < max_items) items[count++] = PIDS_OOM_SCORE;
-        if (count < max_items) items[count++] = PIDS_OOM_ADJ;
-    }
-    
-    /* PROC_FILLNS items */
-    if (flags & PROC_FILLNS) {
-        if (count < max_items) items[count++] = PIDS_NS_IPC;
-        if (count < max_items) items[count++] = PIDS_NS_MNT;
-        if (count < max_items) items[count++] = PIDS_NS_NET;
-        if (count < max_items) items[count++] = PIDS_NS_PID;
-        if (count < max_items) items[count++] = PIDS_NS_USER;
-        if (count < max_items) items[count++] = PIDS_NS_UTS;
-    }
-    
-    /* PROC_FILLSYSTEMD items */
-    if (flags & PROC_FILLSYSTEMD) {
-        if (count < max_items) items[count++] = PIDS_SD_MACH;
-        if (count < max_items) items[count++] = PIDS_SD_OUID;
-        if (count < max_items) items[count++] = PIDS_SD_SEAT;
-        if (count < max_items) items[count++] = PIDS_SD_SESS;
-        if (count < max_items) items[count++] = PIDS_SD_SLICE;
-        if (count < max_items) items[count++] = PIDS_SD_UNIT;
-        if (count < max_items) items[count++] = PIDS_SD_UUNIT;
-    }
-    
-    /* PROC_FILL_LXC items */
-    if (flags & PROC_FILL_LXC) {
-        if (count < max_items) items[count++] = PIDS_LXCNAME;
-    }
-    
-    /* PROC_FILL_LUID items */
-    if (flags & PROC_FILL_LUID) {
-        if (count < max_items) items[count++] = PIDS_ID_LOGIN;
-    }
-    
-    /* PROC_FILL_EXE items */
-    if (flags & PROC_FILL_EXE) {
-        if (count < max_items) items[count++] = PIDS_EXE;
-    }
-    
-    /* PROC_FILLIO items */
-    if (flags & PROC_FILLIO) {
-        if (count < max_items) items[count++] = PIDS_IO_READ_BYTES;
-        if (count < max_items) items[count++] = PIDS_IO_WRITE_BYTES;
-        if (count < max_items) items[count++] = PIDS_IO_READ_CHARS;
-        if (count < max_items) items[count++] = PIDS_IO_WRITE_CHARS;
-        if (count < max_items) items[count++] = PIDS_IO_READ_OPS;
-        if (count < max_items) items[count++] = PIDS_IO_WRITE_OPS;
-        if (count < max_items) items[count++] = PIDS_IO_WRITE_CBYTES;
-    }
-    
-    /* PROC_FILLSMAPS items */
-    if (flags & PROC_FILLSMAPS) {
-        if (count < max_items) items[count++] = PIDS_SMAP_RSS;
-        if (count < max_items) items[count++] = PIDS_SMAP_PSS;
-        if (count < max_items) items[count++] = PIDS_SMAP_PSS_ANON;
-        if (count < max_items) items[count++] = PIDS_SMAP_PSS_FILE;
-        if (count < max_items) items[count++] = PIDS_SMAP_PSS_SHMEM;
-        if (count < max_items) items[count++] = PIDS_SMAP_SHR_CLEAN;
-        if (count < max_items) items[count++] = PIDS_SMAP_SHR_DIRTY;
-        if (count < max_items) items[count++] = PIDS_SMAP_PRV_CLEAN;
-        if (count < max_items) items[count++] = PIDS_SMAP_PRV_DIRTY;
-        if (count < max_items) items[count++] = PIDS_SMAP_REFERENCED;
-        if (count < max_items) items[count++] = PIDS_SMAP_ANONYMOUS;
-        if (count < max_items) items[count++] = PIDS_SMAP_LAZY_FREE;
-        if (count < max_items) items[count++] = PIDS_SMAP_HUGE_ANON;
-        if (count < max_items) items[count++] = PIDS_SMAP_HUGE_SHMEM;
-        if (count < max_items) items[count++] = PIDS_SMAP_HUGE_FILE;
-        if (count < max_items) items[count++] = PIDS_SMAP_HUGE_TLBSHR;
-        if (count < max_items) items[count++] = PIDS_SMAP_HUGE_TLBPRV;
-        if (count < max_items) items[count++] = PIDS_SMAP_SWAP;
-        if (count < max_items) items[count++] = PIDS_SMAP_SWAP_PSS;
-        if (count < max_items) items[count++] = PIDS_SMAP_LOCKED;
-    }
-    
-    /* PROC_FILLAUTOGRP items */
-    if (flags & PROC_FILLAUTOGRP) {
-        if (count < max_items) items[count++] = PIDS_AUTOGRP_ID;
-        if (count < max_items) items[count++] = PIDS_AUTOGRP_NICE;
-    }
-    
-    /* PROC_FILL_SUPGRP items */
-    if (flags & PROC_FILL_SUPGRP) {
-        if (count < max_items) items[count++] = PIDS_SUPGIDS;
-        if (count < max_items) items[count++] = PIDS_SUPGROUPS;
-    }
-    
-    /* PROC_FILL_DOCKER items */
-    if (flags & PROC_FILL_DOCKER) {
-        if (count < max_items) items[count++] = PIDS_DOCKER_ID;
-        if (count < max_items) items[count++] = PIDS_DOCKER_ID_64;
-    }
-    
-    /* PROC_FILL_FDS items */
-    if (flags & PROC_FILL_FDS) {
-        if (count < max_items) items[count++] = PIDS_OPEN_FILES;
+    /* Add items based on flags using the mapping table */
+    for (i = 0; i < sizeof(flag_mappings) / sizeof(flag_mappings[0]); i++) {
+        if (count >= max_items)
+            break;
+        if (flags & flag_mappings[i].flag) {
+            items[count++] = flag_mappings[i].item;
+        }
     }
     
     /* Always include CMD for convenience */
@@ -256,20 +239,36 @@ int procps_compat_flags_to_items(unsigned flags, enum pids_item *items, int max_
 /* Helper to find an item in the items array and return its index */
 static int find_item_index(enum pids_item *items, int num_items, enum pids_item item)
 {
-    for (int i = 0; i < num_items; i++) {
+    int i;
+    for (i = 0; i < num_items; i++) {
         if (items[i] == item)
             return i;
     }
     return -1;
 }
 
-/* Helper macro to safely copy string value from stack */
-#define COPY_STR(item_enum, dest) do { \
-    int idx = find_item_index(items, num_items, item_enum); \
+/* Macro for setting numeric fields from pids_stack */
+#define SET_NUMERIC_FIELD(pids_item, proc_field, type) do { \
+    int idx = find_item_index(items, num_items, pids_item); \
+    if (idx >= 0) proc->proc_field = PIDS_VAL(idx, type, stack); \
+} while(0)
+
+/* Macro for setting string fields from pids_stack */
+#define SET_STRING_FIELD(pids_item, proc_field) do { \
+    int idx = find_item_index(items, num_items, pids_item); \
     if (idx >= 0 && PIDS_VAL(idx, str, stack)) { \
-        dest = strdup(PIDS_VAL(idx, str, stack)); \
+        proc->proc_field = strdup(PIDS_VAL(idx, str, stack)); \
     } else { \
-        dest = NULL; \
+        proc->proc_field = NULL; \
+    } \
+} while(0)
+
+/* Macro for setting fixed-size string fields from pids_stack */
+#define SET_FIXED_STRING_FIELD(pids_item, proc_field) do { \
+    int idx = find_item_index(items, num_items, pids_item); \
+    if (idx >= 0 && PIDS_VAL(idx, str, stack)) { \
+        strncpy(proc->proc_field, PIDS_VAL(idx, str, stack), sizeof(proc->proc_field) - 1); \
+        proc->proc_field[sizeof(proc->proc_field) - 1] = '\0'; \
     } \
 } while(0)
 
@@ -280,371 +279,164 @@ int procps_compat_stack_to_proc_t(
     enum pids_item *items,
     int num_items)
 {
-    int idx;
-    
     if (!stack || !proc || !items)
         return -1;
     
     /* Initialize proc_t to zero */
     memset(proc, 0, sizeof(proc_t));
     
-    /* Fill in basic process IDs */
-    idx = find_item_index(items, num_items, PIDS_ID_TID);
-    if (idx >= 0) proc->tid = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_PPID);
-    if (idx >= 0) proc->ppid = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_TGID);
-    if (idx >= 0) proc->tgid = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_STATE);
-    if (idx >= 0) proc->state = PIDS_VAL(idx, s_ch, stack);
-    
-    /* Fill in time-related fields */
-    idx = find_item_index(items, num_items, PIDS_TICS_USER);
-    if (idx >= 0) proc->utime = PIDS_VAL(idx, ull_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_TICS_SYSTEM);
-    if (idx >= 0) proc->stime = PIDS_VAL(idx, ull_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_TICS_USER_C);
-    if (idx >= 0) proc->cutime = PIDS_VAL(idx, ull_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_TICS_SYSTEM_C);
-    if (idx >= 0) proc->cstime = PIDS_VAL(idx, ull_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_TICS_BEGAN);
-    if (idx >= 0) proc->start_time = PIDS_VAL(idx, ull_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_TICS_BLKIO);
-    if (idx >= 0) proc->blkio_tics = PIDS_VAL(idx, ull_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_TICS_GUEST);
-    if (idx >= 0) proc->gtime = PIDS_VAL(idx, ull_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_TICS_GUEST_C);
-    if (idx >= 0) proc->cgtime = PIDS_VAL(idx, ull_int, stack);
-    
-    /* Fill in priority and scheduling */
-    idx = find_item_index(items, num_items, PIDS_PRIORITY);
-    if (idx >= 0) proc->priority = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_NICE);
-    if (idx >= 0) proc->nice = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_PRIORITY_RT);
-    if (idx >= 0) proc->rtprio = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SCHED_CLASS);
-    if (idx >= 0) proc->sched = PIDS_VAL(idx, s_int, stack);
-    
-    /* Fill in memory fields */
-    idx = find_item_index(items, num_items, PIDS_MEM_VIRT_PGS);
-    if (idx >= 0) proc->size = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_MEM_RES_PGS);
-    if (idx >= 0) proc->resident = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_MEM_SHR_PGS);
-    if (idx >= 0) proc->share = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_MEM_CODE_PGS);
-    if (idx >= 0) proc->trs = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_MEM_DATA_PGS);
-    if (idx >= 0) proc->drs = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_VM_SIZE);
-    if (idx >= 0) proc->vm_size = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_VM_RSS);
-    if (idx >= 0) proc->vm_rss = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_VM_RSS_ANON);
-    if (idx >= 0) proc->vm_rss_anon = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_VM_RSS_FILE);
-    if (idx >= 0) proc->vm_rss_file = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_VM_RSS_SHARED);
-    if (idx >= 0) proc->vm_rss_shared = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_VM_DATA);
-    if (idx >= 0) proc->vm_data = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_VM_STACK);
-    if (idx >= 0) proc->vm_stack = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_VM_SWAP);
-    if (idx >= 0) proc->vm_swap = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_VM_EXE);
-    if (idx >= 0) proc->vm_exe = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_VM_LIB);
-    if (idx >= 0) proc->vm_lib = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_RSS);
-    if (idx >= 0) proc->rss = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_RSS_RLIM);
-    if (idx >= 0) proc->rss_rlim = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_VSIZE_BYTES);
-    if (idx >= 0) proc->vsize = PIDS_VAL(idx, ul_int, stack);
-    
-    /* Fill in other fields */
-    idx = find_item_index(items, num_items, PIDS_FLAGS);
-    if (idx >= 0) proc->flags = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_FLT_MIN);
-    if (idx >= 0) proc->min_flt = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_FLT_MAJ);
-    if (idx >= 0) proc->maj_flt = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_FLT_MIN_C);
-    if (idx >= 0) proc->cmin_flt = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_FLT_MAJ_C);
-    if (idx >= 0) proc->cmaj_flt = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_NLWP);
-    if (idx >= 0) proc->nlwp = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_TTY);
-    if (idx >= 0) proc->tty = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_PGRP);
-    if (idx >= 0) proc->pgrp = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_SESSION);
-    if (idx >= 0) proc->session = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_TPGID);
-    if (idx >= 0) proc->tpgid = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_EXIT_SIGNAL);
-    if (idx >= 0) proc->exit_signal = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_PROCESSOR);
-    if (idx >= 0) proc->processor = PIDS_VAL(idx, s_int, stack);
-    
-    /* Fill in address fields */
-    idx = find_item_index(items, num_items, PIDS_ADDR_CODE_START);
-    if (idx >= 0) proc->start_code = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ADDR_CODE_END);
-    if (idx >= 0) proc->end_code = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ADDR_STACK_START);
-    if (idx >= 0) proc->start_stack = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ADDR_CURR_ESP);
-    if (idx >= 0) proc->kstk_esp = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ADDR_CURR_EIP);
-    if (idx >= 0) proc->kstk_eip = PIDS_VAL(idx, ul_int, stack);
-    
-    /* Fill in UIDs and GIDs */
-    idx = find_item_index(items, num_items, PIDS_ID_EUID);
-    if (idx >= 0) proc->euid = PIDS_VAL(idx, u_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_EGID);
-    if (idx >= 0) proc->egid = PIDS_VAL(idx, u_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_RUID);
-    if (idx >= 0) proc->ruid = PIDS_VAL(idx, u_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_RGID);
-    if (idx >= 0) proc->rgid = PIDS_VAL(idx, u_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_SUID);
-    if (idx >= 0) proc->suid = PIDS_VAL(idx, u_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_SGID);
-    if (idx >= 0) proc->sgid = PIDS_VAL(idx, u_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_FUID);
-    if (idx >= 0) proc->fuid = PIDS_VAL(idx, u_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_FGID);
-    if (idx >= 0) proc->fgid = PIDS_VAL(idx, u_int, stack);
-    
-    /* Fill in OOM fields */
-    idx = find_item_index(items, num_items, PIDS_OOM_SCORE);
-    if (idx >= 0) proc->oom_score = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_OOM_ADJ);
-    if (idx >= 0) proc->oom_adj = PIDS_VAL(idx, s_int, stack);
-    
-    /* Fill in IO fields */
-    idx = find_item_index(items, num_items, PIDS_IO_READ_CHARS);
-    if (idx >= 0) proc->rchar = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_IO_WRITE_CHARS);
-    if (idx >= 0) proc->wchar = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_IO_READ_OPS);
-    if (idx >= 0) proc->syscr = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_IO_WRITE_OPS);
-    if (idx >= 0) proc->syscw = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_IO_READ_BYTES);
-    if (idx >= 0) proc->read_bytes = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_IO_WRITE_BYTES);
-    if (idx >= 0) proc->write_bytes = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_IO_WRITE_CBYTES);
-    if (idx >= 0) proc->cancelled_write_bytes = PIDS_VAL(idx, ul_int, stack);
-    
-    /* Fill in autogroup fields */
-    idx = find_item_index(items, num_items, PIDS_AUTOGRP_ID);
-    if (idx >= 0) proc->autogrp_id = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_AUTOGRP_NICE);
-    if (idx >= 0) proc->autogrp_nice = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_ID_LOGIN);
-    if (idx >= 0) proc->luid = PIDS_VAL(idx, s_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_OPEN_FILES);
-    if (idx >= 0) proc->fds = PIDS_VAL(idx, s_int, stack);
-    
-    /* Fill in smaps fields */
-    idx = find_item_index(items, num_items, PIDS_SMAP_RSS);
-    if (idx >= 0) proc->smap_Rss = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_PSS);
-    if (idx >= 0) proc->smap_Pss = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_PSS_ANON);
-    if (idx >= 0) proc->smap_Pss_Anon = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_PSS_FILE);
-    if (idx >= 0) proc->smap_Pss_File = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_PSS_SHMEM);
-    if (idx >= 0) proc->smap_Pss_Shmem = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_SHR_CLEAN);
-    if (idx >= 0) proc->smap_Shared_Clean = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_SHR_DIRTY);
-    if (idx >= 0) proc->smap_Shared_Dirty = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_PRV_CLEAN);
-    if (idx >= 0) proc->smap_Private_Clean = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_PRV_DIRTY);
-    if (idx >= 0) proc->smap_Private_Dirty = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_REFERENCED);
-    if (idx >= 0) proc->smap_Referenced = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_ANONYMOUS);
-    if (idx >= 0) proc->smap_Anonymous = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_LAZY_FREE);
-    if (idx >= 0) proc->smap_LazyFree = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_HUGE_ANON);
-    if (idx >= 0) proc->smap_AnonHugePages = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_HUGE_SHMEM);
-    if (idx >= 0) proc->smap_ShmemPmdMapped = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_HUGE_FILE);
-    if (idx >= 0) proc->smap_FilePmdMapped = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_HUGE_TLBSHR);
-    if (idx >= 0) proc->smap_Shared_Hugetlb = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_HUGE_TLBPRV);
-    if (idx >= 0) proc->smap_Private_Hugetlb = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_SWAP);
-    if (idx >= 0) proc->smap_Swap = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_SWAP_PSS);
-    if (idx >= 0) proc->smap_SwapPss = PIDS_VAL(idx, ul_int, stack);
-    
-    idx = find_item_index(items, num_items, PIDS_SMAP_LOCKED);
-    if (idx >= 0) proc->smap_Locked = PIDS_VAL(idx, ul_int, stack);
-    
-    /* Fill in string fields - need to duplicate strings */
-    COPY_STR(PIDS_CMD, proc->cmd);
-    COPY_STR(PIDS_CMDLINE, proc->cmdline);
-    COPY_STR(PIDS_ENVIRON, proc->environ);
-    COPY_STR(PIDS_CGROUP, proc->cgroup);
-    COPY_STR(PIDS_CGNAME, proc->cgname);
-    COPY_STR(PIDS_SUPGIDS, proc->supgid);
-    COPY_STR(PIDS_SUPGROUPS, proc->supgrp);
-    COPY_STR(PIDS_ID_EUSER, proc->euser);
-    COPY_STR(PIDS_ID_RUSER, proc->ruser);
-    COPY_STR(PIDS_ID_SUSER, proc->suser);
-    COPY_STR(PIDS_ID_FUSER, proc->fuser);
-    COPY_STR(PIDS_ID_EGROUP, proc->egroup);
-    COPY_STR(PIDS_ID_RGROUP, proc->rgroup);
-    COPY_STR(PIDS_ID_SGROUP, proc->sgroup);
-    COPY_STR(PIDS_ID_FGROUP, proc->fgroup);
-    COPY_STR(PIDS_SD_MACH, proc->sd_mach);
-    COPY_STR(PIDS_SD_OUID, proc->sd_ouid);
-    COPY_STR(PIDS_SD_SEAT, proc->sd_seat);
-    COPY_STR(PIDS_SD_SESS, proc->sd_sess);
-    COPY_STR(PIDS_SD_SLICE, proc->sd_slice);
-    COPY_STR(PIDS_SD_UNIT, proc->sd_unit);
-    COPY_STR(PIDS_SD_UUNIT, proc->sd_uunit);
-    COPY_STR(PIDS_DOCKER_ID, proc->dockerid);
-    COPY_STR(PIDS_DOCKER_ID_64, proc->dockerid_64);
-    COPY_STR(PIDS_LXCNAME, proc->lxcname);
-    COPY_STR(PIDS_EXE, proc->exe);
-    
-    /* Copy signal masks as strings if available */
-    idx = find_item_index(items, num_items, PIDS_SIGNALS);
-    if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
-        strncpy(proc->signal, PIDS_VAL(idx, str, stack), sizeof(proc->signal) - 1);
-        proc->signal[sizeof(proc->signal) - 1] = '\0';
-    }
-    
-    idx = find_item_index(items, num_items, PIDS_SIGBLOCKED);
-    if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
-        strncpy(proc->blocked, PIDS_VAL(idx, str, stack), sizeof(proc->blocked) - 1);
-        proc->blocked[sizeof(proc->blocked) - 1] = '\0';
-    }
-    
-    idx = find_item_index(items, num_items, PIDS_SIGIGNORE);
-    if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
-        strncpy(proc->sigignore, PIDS_VAL(idx, str, stack), sizeof(proc->sigignore) - 1);
-        proc->sigignore[sizeof(proc->sigignore) - 1] = '\0';
-    }
-    
-    idx = find_item_index(items, num_items, PIDS_SIGCATCH);
-    if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
-        strncpy(proc->sigcatch, PIDS_VAL(idx, str, stack), sizeof(proc->sigcatch) - 1);
-        proc->sigcatch[sizeof(proc->sigcatch) - 1] = '\0';
-    }
-    
-    idx = find_item_index(items, num_items, PIDS_SIGPENDING);
-    if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
-        strncpy(proc->_sigpnd, PIDS_VAL(idx, str, stack), sizeof(proc->_sigpnd) - 1);
-        proc->_sigpnd[sizeof(proc->_sigpnd) - 1] = '\0';
-    }
-    
-    idx = find_item_index(items, num_items, PIDS_CAPS_PERMITTED);
-    if (idx >= 0 && PIDS_VAL(idx, str, stack)) {
-        strncpy(proc->capprm, PIDS_VAL(idx, str, stack), sizeof(proc->capprm) - 1);
-        proc->capprm[sizeof(proc->capprm) - 1] = '\0';
-    }
+    /* Basic process IDs */
+    SET_NUMERIC_FIELD(PIDS_ID_TID, tid, s_int);
+    SET_NUMERIC_FIELD(PIDS_ID_PPID, ppid, s_int);
+    SET_NUMERIC_FIELD(PIDS_ID_TGID, tgid, s_int);
+    SET_NUMERIC_FIELD(PIDS_STATE, state, s_ch);
+    
+    /* Time-related fields */
+    SET_NUMERIC_FIELD(PIDS_TICS_USER, utime, ull_int);
+    SET_NUMERIC_FIELD(PIDS_TICS_SYSTEM, stime, ull_int);
+    SET_NUMERIC_FIELD(PIDS_TICS_USER_C, cutime, ull_int);
+    SET_NUMERIC_FIELD(PIDS_TICS_SYSTEM_C, cstime, ull_int);
+    SET_NUMERIC_FIELD(PIDS_TICS_BEGAN, start_time, ull_int);
+    SET_NUMERIC_FIELD(PIDS_TICS_BLKIO, blkio_tics, ull_int);
+    SET_NUMERIC_FIELD(PIDS_TICS_GUEST, gtime, ull_int);
+    SET_NUMERIC_FIELD(PIDS_TICS_GUEST_C, cgtime, ull_int);
+    
+    /* Priority and scheduling */
+    SET_NUMERIC_FIELD(PIDS_PRIORITY, priority, s_int);
+    SET_NUMERIC_FIELD(PIDS_NICE, nice, s_int);
+    SET_NUMERIC_FIELD(PIDS_PRIORITY_RT, rtprio, s_int);
+    SET_NUMERIC_FIELD(PIDS_SCHED_CLASS, sched, s_int);
+    
+    /* Memory fields */
+    SET_NUMERIC_FIELD(PIDS_MEM_VIRT_PGS, size, ul_int);
+    SET_NUMERIC_FIELD(PIDS_MEM_RES_PGS, resident, ul_int);
+    SET_NUMERIC_FIELD(PIDS_MEM_SHR_PGS, share, ul_int);
+    SET_NUMERIC_FIELD(PIDS_MEM_CODE_PGS, trs, ul_int);
+    SET_NUMERIC_FIELD(PIDS_MEM_DATA_PGS, drs, ul_int);
+    SET_NUMERIC_FIELD(PIDS_VM_SIZE, vm_size, ul_int);
+    SET_NUMERIC_FIELD(PIDS_VM_RSS, vm_rss, ul_int);
+    SET_NUMERIC_FIELD(PIDS_VM_RSS_ANON, vm_rss_anon, ul_int);
+    SET_NUMERIC_FIELD(PIDS_VM_RSS_FILE, vm_rss_file, ul_int);
+    SET_NUMERIC_FIELD(PIDS_VM_RSS_SHARED, vm_rss_shared, ul_int);
+    SET_NUMERIC_FIELD(PIDS_VM_DATA, vm_data, ul_int);
+    SET_NUMERIC_FIELD(PIDS_VM_STACK, vm_stack, ul_int);
+    SET_NUMERIC_FIELD(PIDS_VM_SWAP, vm_swap, ul_int);
+    SET_NUMERIC_FIELD(PIDS_VM_EXE, vm_exe, ul_int);
+    SET_NUMERIC_FIELD(PIDS_VM_LIB, vm_lib, ul_int);
+    SET_NUMERIC_FIELD(PIDS_RSS, rss, ul_int);
+    SET_NUMERIC_FIELD(PIDS_RSS_RLIM, rss_rlim, ul_int);
+    SET_NUMERIC_FIELD(PIDS_VSIZE_BYTES, vsize, ul_int);
+    
+    /* Other numeric fields */
+    SET_NUMERIC_FIELD(PIDS_FLAGS, flags, ul_int);
+    SET_NUMERIC_FIELD(PIDS_FLT_MIN, min_flt, ul_int);
+    SET_NUMERIC_FIELD(PIDS_FLT_MAJ, maj_flt, ul_int);
+    SET_NUMERIC_FIELD(PIDS_FLT_MIN_C, cmin_flt, ul_int);
+    SET_NUMERIC_FIELD(PIDS_FLT_MAJ_C, cmaj_flt, ul_int);
+    SET_NUMERIC_FIELD(PIDS_NLWP, nlwp, s_int);
+    SET_NUMERIC_FIELD(PIDS_TTY, tty, s_int);
+    SET_NUMERIC_FIELD(PIDS_ID_PGRP, pgrp, s_int);
+    SET_NUMERIC_FIELD(PIDS_ID_SESSION, session, s_int);
+    SET_NUMERIC_FIELD(PIDS_ID_TPGID, tpgid, s_int);
+    SET_NUMERIC_FIELD(PIDS_EXIT_SIGNAL, exit_signal, s_int);
+    SET_NUMERIC_FIELD(PIDS_PROCESSOR, processor, s_int);
+    
+    /* Address fields */
+    SET_NUMERIC_FIELD(PIDS_ADDR_CODE_START, start_code, ul_int);
+    SET_NUMERIC_FIELD(PIDS_ADDR_CODE_END, end_code, ul_int);
+    SET_NUMERIC_FIELD(PIDS_ADDR_STACK_START, start_stack, ul_int);
+    SET_NUMERIC_FIELD(PIDS_ADDR_CURR_ESP, kstk_esp, ul_int);
+    SET_NUMERIC_FIELD(PIDS_ADDR_CURR_EIP, kstk_eip, ul_int);
+    
+    /* UIDs and GIDs */
+    SET_NUMERIC_FIELD(PIDS_ID_EUID, euid, u_int);
+    SET_NUMERIC_FIELD(PIDS_ID_EGID, egid, u_int);
+    SET_NUMERIC_FIELD(PIDS_ID_RUID, ruid, u_int);
+    SET_NUMERIC_FIELD(PIDS_ID_RGID, rgid, u_int);
+    SET_NUMERIC_FIELD(PIDS_ID_SUID, suid, u_int);
+    SET_NUMERIC_FIELD(PIDS_ID_SGID, sgid, u_int);
+    SET_NUMERIC_FIELD(PIDS_ID_FUID, fuid, u_int);
+    SET_NUMERIC_FIELD(PIDS_ID_FGID, fgid, u_int);
+    
+    /* OOM fields */
+    SET_NUMERIC_FIELD(PIDS_OOM_SCORE, oom_score, s_int);
+    SET_NUMERIC_FIELD(PIDS_OOM_ADJ, oom_adj, s_int);
+    
+    /* IO fields */
+    SET_NUMERIC_FIELD(PIDS_IO_READ_CHARS, rchar, ul_int);
+    SET_NUMERIC_FIELD(PIDS_IO_WRITE_CHARS, wchar, ul_int);
+    SET_NUMERIC_FIELD(PIDS_IO_READ_OPS, syscr, ul_int);
+    SET_NUMERIC_FIELD(PIDS_IO_WRITE_OPS, syscw, ul_int);
+    SET_NUMERIC_FIELD(PIDS_IO_READ_BYTES, read_bytes, ul_int);
+    SET_NUMERIC_FIELD(PIDS_IO_WRITE_BYTES, write_bytes, ul_int);
+    SET_NUMERIC_FIELD(PIDS_IO_WRITE_CBYTES, cancelled_write_bytes, ul_int);
+    
+    /* Autogroup fields */
+    SET_NUMERIC_FIELD(PIDS_AUTOGRP_ID, autogrp_id, s_int);
+    SET_NUMERIC_FIELD(PIDS_AUTOGRP_NICE, autogrp_nice, s_int);
+    SET_NUMERIC_FIELD(PIDS_ID_LOGIN, luid, s_int);
+    SET_NUMERIC_FIELD(PIDS_OPEN_FILES, fds, s_int);
+    
+    /* Smaps fields */
+    SET_NUMERIC_FIELD(PIDS_SMAP_RSS, smap_Rss, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_PSS, smap_Pss, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_PSS_ANON, smap_Pss_Anon, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_PSS_FILE, smap_Pss_File, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_PSS_SHMEM, smap_Pss_Shmem, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_SHR_CLEAN, smap_Shared_Clean, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_SHR_DIRTY, smap_Shared_Dirty, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_PRV_CLEAN, smap_Private_Clean, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_PRV_DIRTY, smap_Private_Dirty, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_REFERENCED, smap_Referenced, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_ANONYMOUS, smap_Anonymous, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_LAZY_FREE, smap_LazyFree, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_HUGE_ANON, smap_AnonHugePages, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_HUGE_SHMEM, smap_ShmemPmdMapped, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_HUGE_FILE, smap_FilePmdMapped, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_HUGE_TLBSHR, smap_Shared_Hugetlb, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_HUGE_TLBPRV, smap_Private_Hugetlb, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_SWAP, smap_Swap, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_SWAP_PSS, smap_SwapPss, ul_int);
+    SET_NUMERIC_FIELD(PIDS_SMAP_LOCKED, smap_Locked, ul_int);
+    
+    /* String fields */
+    SET_STRING_FIELD(PIDS_CMD, cmd);
+    SET_STRING_FIELD(PIDS_CMDLINE, cmdline);
+    SET_STRING_FIELD(PIDS_ENVIRON, environ);
+    SET_STRING_FIELD(PIDS_CGROUP, cgroup);
+    SET_STRING_FIELD(PIDS_CGNAME, cgname);
+    SET_STRING_FIELD(PIDS_SUPGIDS, supgid);
+    SET_STRING_FIELD(PIDS_SUPGROUPS, supgrp);
+    SET_STRING_FIELD(PIDS_ID_EUSER, euser);
+    SET_STRING_FIELD(PIDS_ID_RUSER, ruser);
+    SET_STRING_FIELD(PIDS_ID_SUSER, suser);
+    SET_STRING_FIELD(PIDS_ID_FUSER, fuser);
+    SET_STRING_FIELD(PIDS_ID_EGROUP, egroup);
+    SET_STRING_FIELD(PIDS_ID_RGROUP, rgroup);
+    SET_STRING_FIELD(PIDS_ID_SGROUP, sgroup);
+    SET_STRING_FIELD(PIDS_ID_FGROUP, fgroup);
+    SET_STRING_FIELD(PIDS_SD_MACH, sd_mach);
+    SET_STRING_FIELD(PIDS_SD_OUID, sd_ouid);
+    SET_STRING_FIELD(PIDS_SD_SEAT, sd_seat);
+    SET_STRING_FIELD(PIDS_SD_SESS, sd_sess);
+    SET_STRING_FIELD(PIDS_SD_SLICE, sd_slice);
+    SET_STRING_FIELD(PIDS_SD_UNIT, sd_unit);
+    SET_STRING_FIELD(PIDS_SD_UUNIT, sd_uunit);
+    SET_STRING_FIELD(PIDS_DOCKER_ID, dockerid);
+    SET_STRING_FIELD(PIDS_DOCKER_ID_64, dockerid_64);
+    SET_STRING_FIELD(PIDS_LXCNAME, lxcname);
+    SET_STRING_FIELD(PIDS_EXE, exe);
+    
+    /* Fixed-size string fields (signal masks, etc.) */
+    SET_FIXED_STRING_FIELD(PIDS_SIGNALS, signal);
+    SET_FIXED_STRING_FIELD(PIDS_SIGBLOCKED, blocked);
+    SET_FIXED_STRING_FIELD(PIDS_SIGIGNORE, sigignore);
+    SET_FIXED_STRING_FIELD(PIDS_SIGCATCH, sigcatch);
+    SET_FIXED_STRING_FIELD(PIDS_SIGPENDING, _sigpnd);
+    SET_FIXED_STRING_FIELD(PIDS_CAPS_PERMITTED, capprm);
     
     return 0;
 }
-
-/* Maximum number of pids_item enums we support in compatibility mode */
-#define COMPAT_MAX_ITEMS 256
 
 /* Initialize process table reading with compatibility mode */
 procps_compat_proctab *procps_compat_openproc(unsigned flags)
